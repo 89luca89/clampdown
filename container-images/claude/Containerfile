@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Install claude and podman-remote
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS builder
+
+RUN apk add --no-cache bash curl nodejs podman-remote \
+    && curl -fsSL https://claude.ai/install.sh | bash
+
+# Docker Compose standalone binary.
+# Pinned to v2.32.4 — last version confirmed working with podman compat API v1.41.
+# docker compose v2.29+ may require API v1.44+; test before bumping.
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS compose
+ARG TARGETARCH
+ARG COMPOSE_VERSION=v2.32.4
+RUN wget -qO /docker-compose \
+    "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" \
+    && chmod +x /docker-compose
+
+# Main agent image. Base alpine + nodejs (for claude) and some cli utils.
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95
+
+COPY --from=builder /root/.local/share/claude/versions/* /usr/local/bin/claude
+COPY sandbox-seal /usr/local/bin/sandbox-seal
+# podman-remote is a self-contained Go binary (only links musl libc).
+# Copy it directly to avoid pulling 40+ unnecessary runtime deps (crun, conmon,
+# netavark, glib, gnupg, etc.) that Alpine's package drags in.
+# Symlinked to both `podman` and `docker` for compatibility.
+COPY --from=builder /usr/bin/podman-remote /usr/bin/podman-remote
+# Docker Compose standalone binary — talks to sidecar podman API via DOCKER_HOST.
+COPY --from=compose /docker-compose /usr/local/bin/docker-compose
+
+# Busybox (built into Alpine) provides coreutils: ls, cp, mv, cat, head, etc.
+# Only add packages not covered by busybox.
+RUN apk add --no-cache \
+    bash coreutils nodejs \
+    ripgrep jq \
+    && ln -s podman-remote /usr/bin/podman \
+    && ln -s podman-remote /usr/bin/docker \
+    && mkdir -p /usr/local/lib/docker/cli-plugins \
+    && ln -s /usr/local/bin/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+
+ENTRYPOINT ["/usr/local/bin/sandbox-seal", "--", "/usr/local/bin/claude"]

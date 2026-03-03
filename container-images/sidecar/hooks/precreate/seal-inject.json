@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/libexec/oci/hooks.d/seal-inject",
+    "args": ["seal-inject"]
+  },
+  "when": {
+    "always": true
+  },
+  "stages": ["precreate"]
+}

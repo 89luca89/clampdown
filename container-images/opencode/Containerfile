@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# OpenCode agent image (anomalyco/opencode).
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS builder
+RUN apk add --no-cache bash curl \
+    && curl -fsSL https://opencode.ai/install | bash
+
+# podman-remote for container operations inside the sandbox.
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS podman
+RUN apk add --no-cache podman-remote
+
+# Docker Compose standalone binary.
+# Pinned to v2.32.4 — last version confirmed working with podman compat API v1.41.
+# docker compose v2.29+ may require API v1.44+; test before bumping.
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS compose
+ARG TARGETARCH
+ARG COMPOSE_VERSION=v2.32.4
+RUN wget -qO /docker-compose \
+    "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" \
+    && chmod +x /docker-compose
+
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95
+
+COPY --from=builder /root/.opencode/bin/opencode /usr/local/bin/opencode
+COPY sandbox-seal /usr/local/bin/sandbox-seal
+COPY --from=podman /usr/bin/podman-remote /usr/bin/podman-remote
+COPY --from=compose /docker-compose /usr/local/bin/docker-compose
+
+RUN apk add --no-cache \
+    libgcc libc++ libstdc++ \
+    bash coreutils ripgrep jq \
+    && ln -s podman-remote /usr/bin/podman \
+    && ln -s podman-remote /usr/bin/docker
+
+ENTRYPOINT ["/usr/local/bin/sandbox-seal", "--", "/usr/local/bin/opencode"]

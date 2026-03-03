@@ -1,0 +1,27 @@
+{
+    "default": [
+        {
+            "type": "reject"
+        }
+    ],
+    "transports": {
+        "containers-storage": {
+            "": [{"type": "insecureAcceptAnything"}]
+        },
+        "docker-archive": {
+            "": [{"type": "insecureAcceptAnything"}]
+        },
+        "docker-daemon": {
+            "": [{"type": "insecureAcceptAnything"}]
+        },
+        "oci-archive": {
+            "": [{"type": "insecureAcceptAnything"}]
+        },
+        "docker": {
+            "docker.io": [{"type": "insecureAcceptAnything"}],
+            "ghcr.io": [{"type": "insecureAcceptAnything"}],
+            "quay.io": [{"type": "insecureAcceptAnything"}],
+            "localhost": [{"type": "insecureAcceptAnything"}]
+        }
+    }
+}

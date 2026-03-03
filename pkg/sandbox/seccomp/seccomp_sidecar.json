@@ -1,0 +1,271 @@
+{
+  "comment": "Sidecar seccomp profile. defaultAction ALLOW (denylist) because nested workload containers inherit this filter and need arbitrary syscalls. Every syscall in syscalls.log is guaranteed unblocked. All dangerous syscalls NOT in that list are blocked. No excludes.caps for capabilities the sidecar holds (SYS_ADMIN, NET_ADMIN, etc.) — those would silently skip the rule at BPF generation time.",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_X32",
+    "SCMP_ARCH_AARCH64",
+    "SCMP_ARCH_ARM"
+  ],
+  "syscalls": [
+
+    {
+      "names": [
+        "bdflush",
+        "create_module",
+        "get_kernel_syms",
+        "nfsservctl",
+        "query_module",
+        "uselib",
+        "ustat",
+        "vm86",
+        "vm86old",
+        "_sysctl",
+        "sysfs",
+        "nice",
+        "oldfstat",
+        "oldlstat",
+        "oldolduname",
+        "oldstat",
+        "olduname",
+        "sgetmask",
+        "ssetmask",
+        "syscall"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Obsolete and removed syscalls. ENOSYS — kernel itself returns ENOSYS for these."
+    },
+
+    {
+      "names": [
+        "io_pgetevents",
+        "io_pgetevents_time64",
+        "map_shadow_stack",
+        "pciconfig_iobase",
+        "pciconfig_read",
+        "pciconfig_write"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Rarely-used or arch-specific syscalls. ENOSYS — io_pgetevents: old AIO. pciconfig_*: raw PCI (PowerPC). map_shadow_stack: CET (not used by Go/podman)."
+    },
+
+    {
+      "names": [
+        "cachestat",
+        "futex_requeue",
+        "futex_wait",
+        "futex_waitv",
+        "futex_wake"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Newer kernel APIs (6.5+/6.7+) not yet used by musl/Go. ENOSYS for graceful fallback — callers retry with older syscalls."
+    },
+
+    {
+      "names": ["io_uring_setup", "io_uring_enter", "io_uring_register"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "io_uring: massive kernel attack surface. Curing rootkit, 60% of Google kernel bug bounty. ENOSYS so Bun/libuv fall back to epoll. Podman uses epoll, not io_uring."
+    },
+
+
+    {
+      "names": ["perf_event_open"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Performance monitoring. Kernel info leak and exploitation aid. No excludes.caps — sidecar has SYS_ADMIN."
+    },
+
+    {
+      "names": ["userfaultfd"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Use-after-free exploitation primitive (CVE-2022-2602 class). ENOSYS so JVM GC / QEMU fall back. Not needed by podman."
+    },
+
+
+    {
+      "names": ["modify_ldt"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "x86 LDT modification: kernel attack surface (CVE-2017-6346)."
+    },
+
+    {
+      "names": ["kcmp"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Process comparison. Info disclosure (fd/vm/file identity). No excludes.caps — sidecar has SYS_PTRACE."
+    },
+
+    {
+      "names": ["process_madvise"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Cross-process memory advice. No excludes.caps — sidecar has SYS_PTRACE."
+    },
+
+    {
+      "names": ["add_key", "request_key"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Kernel keyring manipulation. ENOSYS — keyctl is allowed (in syscalls.log) but add_key and request_key are not used."
+    },
+
+    {
+      "names": ["kexec_load", "kexec_file_load"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Kernel replacement. Catastrophic if exploited."
+    },
+
+    {
+      "names": ["finit_module", "init_module", "delete_module"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Kernel module loading/unloading. Sidecar lacks CAP_SYS_MODULE — kernel denies anyway. Default seccomp profile also blocks without SYS_MODULE."
+    },
+
+    {
+      "names": ["lookup_dcookie"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Kernel profiling info leak (dcookie → dentry path resolution). ENOSYS — requires CONFIG_PROFILING."
+    },
+
+    {
+      "names": ["move_pages", "migrate_pages"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "NUMA memory migration. Info leak and kernel attack surface."
+    },
+
+    {
+      "names": ["settimeofday", "stime", "clock_settime", "clock_settime64"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Time modification. Sidecar lacks CAP_SYS_TIME — kernel denies anyway. Default seccomp profile also blocks without SYS_TIME."
+    },
+
+    {
+      "names": ["quotactl_fd"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Disk quota via fd. ENOSYS — newer API (5.14+). quotactl (non-fd) is allowed (in syscalls.log)."
+    },
+
+    {
+      "names": ["swapoff", "swapon"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "DoS / data exposure. Default seccomp profile blocks unconditionally."
+    },
+
+    {
+      "names": ["acct"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Process accounting — host file write. Sidecar lacks CAP_SYS_PACCT."
+    },
+
+    {
+      "names": ["vhangup"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Virtual terminal hangup. Sidecar lacks CAP_SYS_TTY_CONFIG."
+    },
+
+    {
+      "names": ["ioperm", "iopl"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Raw I/O port access. Sidecar lacks CAP_SYS_RAWIO."
+    },
+
+    {
+      "names": ["open_by_handle_at"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Shocker exploit (CVE-2014-5946). Sidecar lacks CAP_DAC_READ_SEARCH. Default seccomp profile also blocks without DAC_READ_SEARCH."
+    },
+
+    {
+      "names": ["splice", "tee"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Dirty Pipe (CVE-2022-0847). ENOSYS so Go io.Copy falls back to userspace read/write. Stricter than default profile (which allows splice/tee)."
+    },
+    {
+      "names": ["vmsplice"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Dirty Pipe class (CVE-2022-0847). ENOSYS consistent with splice/tee."
+    },
+
+    {
+      "names": ["personality"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 0, "value": 0, "valueTwo": 0, "op": "SCMP_CMP_NE" },
+        { "index": 0, "value": 8, "valueTwo": 0, "op": "SCMP_CMP_NE" },
+        { "index": 0, "value": 131072, "valueTwo": 0, "op": "SCMP_CMP_NE" },
+        { "index": 0, "value": 131080, "valueTwo": 0, "op": "SCMP_CMP_NE" },
+        { "index": 0, "value": 4294967295, "valueTwo": 0, "op": "SCMP_CMP_NE" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block READ_IMPLIES_EXEC, ASLR disable, etc. Allow only PER_LINUX (0), UNAME26 (8), ADDR_LIMIT_3GB (131072/131080), and QUERY (0xFFFFFFFF). Matches default seccomp profile."
+    },
+    {
+      "names": ["mmap", "mmap2", "mprotect", "pkey_mprotect"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 2, "value": 6, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 6 }
+      ],
+      "comment": "W^X enforcement: block simultaneous PROT_WRITE|PROT_EXEC (0x2|0x4). Sidecar runs static Go binaries — no JIT, no RWX needed. Inherited by nested containers."
+    },
+
+    {
+      "names": ["socket"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 0, "value": 17, "valueTwo": 0, "op": "SCMP_CMP_GE" }
+      ],
+      "errnoRet": 97,
+      "comment": "Block socket families >= 17. Allows AF_UNIX (1), AF_INET (2), AF_INET6 (10), AF_NETLINK (16). Blocks AF_PACKET (17), AF_TIPC (30, CVE-2021-43267), AF_ALG (38), AF_VSOCK (40). Inherited by nested containers."
+    },
+
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 21522, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block TIOCSTI (0x5412): terminal keystroke injection (CVE-2017-5226). Inherited by nested containers."
+    },
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 21532, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block TIOCLINUX (0x541c): terminal injection (CVE-2023-1523). Inherited by nested containers."
+    },
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 1074288480, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block IOC_WATCH_QUEUE_SET_FILTER (0x40085760): watch_queue OOB heap write (CVE-2022-0995). Inherited by nested containers."
+    }
+
+  ]
+}

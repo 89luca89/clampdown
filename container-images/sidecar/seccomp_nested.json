@@ -1,0 +1,305 @@
+{
+  "comment": "Workload seccomp profile for agent and nested containers. Denylist blocking all dangerous syscalls workloads never need: container escape, kernel code execution, kernel exploitation primitives, privilege escalation, keyring, system disruption, hardware I/O, time manipulation, SysV IPC, terminal injection, NUMA, new mount API, device node creation, and obsolete syscalls.",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_X32",
+    "SCMP_ARCH_AARCH64",
+    "SCMP_ARCH_ARM"
+  ],
+  "syscalls": [
+
+    {
+      "names": [
+        "mount",
+        "umount",
+        "umount2",
+        "pivot_root",
+        "setns",
+        "chroot",
+        "open_by_handle_at",
+        "name_to_handle_at",
+        "setdomainname",
+        "sethostname",
+        "open_tree",
+        "move_mount",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "mount_setattr",
+        "mknod",
+        "mknodat"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Container escape / namespace manipulation. mount/umount: CVE-2022-0492. setns: nsenter escape. open_by_handle_at: Shocker exploit. open_tree/move_mount/fsopen/fsconfig/fsmount/mount_setattr: new mount API (Linux 5.2+), same risk as mount(). mknod/mknodat: device node creation. Workloads never need any of these — only crun does during container creation."
+    },
+    {
+      "names": ["clone"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 0, "value": 268435456, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 268435456 }
+      ],
+      "comment": "Block clone(CLONE_NEWUSER): user namespace escalation. Other clone flags (CLONE_VM, CLONE_FS, etc.) remain allowed for threads/processes."
+    },
+    {
+      "names": ["clone3"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "clone3 passes flags in struct — seccomp cannot inspect them. ENOSYS so Go forkExec falls back to clone()."
+    },
+    {
+      "names": ["unshare"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 0, "value": 268435456, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 268435456 }
+      ],
+      "comment": "Block unshare(CLONE_NEWUSER): user namespace escalation."
+    },
+
+    {
+      "names": [
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "create_module",
+        "query_module",
+        "get_kernel_syms",
+        "kexec_load",
+        "kexec_file_load"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Kernel code execution. Module loading and kernel replacement."
+    },
+
+    {
+      "names": ["bpf"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "eBPF program loading. Kernel exploitation vector (CVE-2021-3490)."
+    },
+    {
+      "names": [
+        "cachestat",
+        "futex_requeue",
+        "futex_wait",
+        "futex_waitv",
+        "futex_wake"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Newer kernel APIs (6.5+/6.7+) not yet used by musl/Go. ENOSYS for graceful fallback."
+    },
+
+    {
+      "names": ["io_uring_setup", "io_uring_enter", "io_uring_register"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "io_uring: massive kernel attack surface. Curing rootkit, 60% of Google kernel bug bounty. ENOSYS so Bun/libuv fall back to epoll."
+    },
+    {
+      "names": ["userfaultfd"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Use-after-free exploitation primitive (CVE-2022-2602 class). ENOSYS so JVM GC / QEMU fall back."
+    },
+    {
+      "names": ["perf_event_open"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Performance monitoring. Kernel info leak and exploitation aid."
+    },
+    {
+      "names": ["modify_ldt"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "x86 LDT modification (CVE-2017-6346)."
+    },
+    {
+      "names": ["splice", "tee"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Dirty Pipe (CVE-2022-0847). ENOSYS so Go io.Copy falls back to read/write."
+    },
+    {
+      "names": ["vmsplice"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Dirty Pipe (CVE-2022-0847). ENOSYS consistent with splice/tee."
+    },
+    {
+      "names": ["lookup_dcookie"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Kernel profiling info leak. ENOSYS — requires CONFIG_PROFILING."
+    },
+    {
+      "names": ["personality"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "READ_IMPLIES_EXEC, ASLR disable."
+    },
+    {
+      "names": ["remap_file_pages"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Non-linear page mappings. Deprecated since 3.16. ENOSYS."
+    },
+    {
+      "names": ["fanotify_init", "fanotify_mark"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Filesystem monitoring. Requires CAP_SYS_ADMIN."
+    },
+    {
+      "names": ["seccomp"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent seccomp filter self-modification."
+    },
+
+    {
+      "names": [
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev",
+        "kcmp",
+        "process_madvise"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Privilege escalation. ptrace: process injection (CVE-2016-9962). process_vm_*: cross-process memory. kcmp: info disclosure."
+    },
+    {
+      "names": ["execveat"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Fileless execution from fd. ENOSYS so glibc posix_spawn falls back to execve. memfd_create + execveat combo still fails."
+    },
+
+    {
+      "names": ["keyctl", "add_key", "request_key"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Kernel keyring: CVE-heavy subsystem (CVE-2016-0728, CVE-2023-6931). ENOSYS — CONFIG_KEYS can be off; programs skip keyring."
+    },
+
+    {
+      "names": [
+        "reboot",
+        "swapon",
+        "swapoff",
+        "acct",
+        "quotactl",
+        "quotactl_fd",
+        "vhangup",
+        "syslog"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "System disruption. reboot: host reboot. swap*: DoS/data exposure. acct: host file write. syslog: kernel ring buffer read."
+    },
+
+    {
+      "names": [
+        "ioperm",
+        "iopl",
+        "pciconfig_iobase",
+        "pciconfig_read",
+        "pciconfig_write"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Hardware / raw I/O. Direct port and PCI access."
+    },
+
+    {
+      "names": [
+        "clock_settime",
+        "clock_settime64",
+        "clock_adjtime",
+        "clock_adjtime64",
+        "adjtimex",
+        "settimeofday",
+        "stime"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Time manipulation. Workloads read time, never set it."
+    },
+
+    {
+      "names": [
+        "shmget", "shmat", "shmdt", "shmctl",
+        "semget", "semop", "semctl", "semtimedop",
+        "msgget", "msgsnd", "msgrcv", "msgctl"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "SysV IPC: cross-namespace info leak vector. ENOSYS — programs fall back to POSIX shm/sem/mq."
+    },
+
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 21522, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block TIOCSTI (0x5412): terminal keystroke injection (CVE-2017-5226)."
+    },
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 21532, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block TIOCLINUX (0x541c): terminal injection (CVE-2023-1523)."
+    },
+    {
+      "names": ["ioctl"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 1, "value": 1074288480, "valueTwo": 0, "op": "SCMP_CMP_EQ" }
+      ],
+      "errnoRet": 1,
+      "comment": "Block IOC_WATCH_QUEUE_SET_FILTER (0x40085760): watch_queue OOB heap write (CVE-2022-0995)."
+    },
+
+    {
+      "names": ["move_pages", "migrate_pages"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "NUMA memory migration. Info leak and kernel attack surface."
+    },
+
+    {
+      "names": [
+        "bdflush", "nfsservctl", "uselib", "vm86", "vm86old",
+        "_sysctl", "sysfs", "ustat", "nice",
+        "oldfstat", "oldlstat", "oldolduname", "oldstat", "olduname",
+        "sgetmask", "ssetmask", "syscall", "map_shadow_stack",
+        "io_pgetevents", "io_pgetevents_time64"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "comment": "Obsolete and removed syscalls. ENOSYS — kernel itself returns ENOSYS for these."
+    },
+
+    {
+      "names": ["socket"],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [
+        { "index": 0, "value": 17, "valueTwo": 0, "op": "SCMP_CMP_GE" }
+      ],
+      "errnoRet": 97,
+      "comment": "Block socket families >= 17. Allows AF_UNIX (1), AF_INET (2), AF_INET6 (10), AF_NETLINK (16). Blocks AF_PACKET, AF_TIPC (CVE-2021-43267), AF_ALG, AF_VSOCK."
+    }
+
+  ]
+}

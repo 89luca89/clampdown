@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# shim to avoid EXDEV on renames
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS shim
+RUN apk add --no-cache gcc musl-dev
+COPY shims/rename_exdev_shim.c /build/
+# -nostdlib: no DT_NEEDED for musl libc — symbols resolve from the
+# host process's libc at load time, so the .so works on both musl and glibc.
+RUN gcc -shared -fPIC -Os -s -nostdlib -o /rename_exdev_shim.so /build/rename_exdev_shim.c
+# Symbol audit — every undefined symbol must be a real export in all glibc
+# versions (back to 2.17) and musl.  fstat/lstat are the known landmines:
+# glibc < 2.33 implements them as __fxstat/__lxstat macros, not symbols.
+RUN ALLOWED="__errno_location __stack_chk_fail __stack_chk_guard close fchmod fchown fsync futimens getpid memcpy open readlink sendfile snprintf strlen syscall unlink" \
+    && for sym in $(nm -D --undefined-only /rename_exdev_shim.so | awk '{print $2}'); do \
+         echo " ${ALLOWED} " | grep -q " ${sym} " \
+           || { echo "FATAL: disallowed undefined symbol: ${sym}"; exit 1; }; \
+       done \
+    && echo "Symbol audit passed"
+
+# podman-static release
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS podman
+ARG TARGETARCH
+# Pinned version — update deliberately after verifying CVE patches.
+# v5.8.0 includes fixes for CVE-2024-1753 (build-time escape) and
+# bundles crun with fixes for CVE-2025-31133/52565/52881 (procfs writes).
+ARG PODMAN_VERSION=v5.8.0
+RUN echo "podman-static ${PODMAN_VERSION} (${TARGETARCH})" \
+    && wget -qO- "https://github.com/mgoltzsche/podman-static/releases/download/${PODMAN_VERSION}/podman-linux-${TARGETARCH}.tar.gz" \
+    | tar xz --strip-components=1 -C /
+
+# extract iptables from alpine and
+FROM alpine:latest@sha256:59855d3dceb3ae53991193bd03301e082b2a7faa56a514b03527ae0ec2ce3a95 AS iptables
+RUN mkdir /iptables && apk add --initdb --root /iptables \
+    --no-cache --no-scripts \
+    --keys-dir /etc/apk/keys \
+    --repositories-file /etc/apk/repositories \
+    ca-certificates-bundle \
+    iptables \
+# Cleanup iptables rootfs — strip shells, package manager, docs
+    && rm -rf /iptables/bin \
+              /iptables/var \
+              /iptables/usr/share \
+              /iptables/lib/apk \
+    && find /iptables/etc -mindepth 1 -maxdepth 1 ! -name ssl -exec rm -rf {} + \
+    && find /iptables -empty -delete
+
+FROM scratch
+# Minimal user database — podman needs to resolve UID 0 to find HOME.
+COPY --from=podman /etc/passwd /etc/passwd
+COPY --from=podman /etc/group /etc/group
+# Static podman + deps (no libc, no shell, no package manager)
+COPY --from=podman /usr/local/bin/ /usr/local/bin/
+COPY --from=podman /usr/local/lib/podman/ /usr/local/lib/podman/
+COPY --from=podman /etc/containers/ /etc/containers/
+# Hardened container defaults — drop-in loaded after stock containers.conf.
+COPY containers.conf /etc/containers/containers.conf
+# Registry defaults: short-name-mode=permissive + unqualified-search=docker.io.
+# Prevents interactive "which registry?" prompt that hangs non-TTY contexts.
+COPY registries.conf /etc/containers/registries.conf
+# Image pull policy: default reject, allowlist major registries + localhost.
+# Based on stock podman-static v5.8.0 policy.json with default flipped to reject.
+COPY policy.json /etc/containers/policy.json
+# Seccomp profile for all nested containers — stricter than sidecar profile.
+# Blocks mount, pivot_root, setns, ptrace, bpf, io_uring, keyring, etc.
+COPY seccomp_nested.json /etc/containers/seccomp_nested.json
+# Alpine's iptables
+COPY --from=iptables /iptables/ /
+COPY seal/sandbox-seal /sandbox-seal
+COPY entrypoint/entrypoint /entrypoint
+COPY hooks/createRuntime/security-policy /usr/libexec/oci/hooks.d/security-policy
+COPY hooks/createRuntime/security-policy.json /usr/share/containers/oci/hooks.d/security-policy.json
+COPY hooks/precreate/seal-inject /usr/libexec/oci/hooks.d/seal-inject
+COPY hooks/precreate/seal-inject.json /usr/share/containers/oci/hooks.d/seal-inject.json
+# EXDEV rename shim — LD_PRELOAD'd via containers.conf into all nested containers.
+COPY --from=shim /rename_exdev_shim.so /rename_exdev_shim.so
+
+# Force OCI isolation for podman build — default may fall back to chroot
+# inside containers, which can't create bridge networks. With OCI isolation,
+# build containers get proper network namespaces on the podman bridge,
+# routing traffic through FORWARD (pod policy) instead of OUTPUT (agent policy).
+ENV BUILDAH_ISOLATION=oci
+
+ENTRYPOINT ["/entrypoint"]
+CMD ["/usr/local/bin/podman", "--log-level=debug", "system", "service", "--time=0", "tcp:127.0.0.1:2375"]
