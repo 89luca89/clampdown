@@ -154,18 +154,21 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 	defer func() {
 		signal.Stop(sigCh)
 		close(done)
-		cleanup(&once, rt, agentName, sidecarName, created)
+		// Stop the tripwire before cleanup so that cleanup's removal of
+		// DevNull placeholder files (paths that didn't exist at session start)
+		// doesn't fire a spurious "read-only path tampered" error.
 		if tw != nil {
 			tw.Stop()
 		}
+		cleanup(&once, rt, agentName, sidecarName, created)
 	}()
 	go func() {
 		select {
 		case <-sigCh:
-			cleanup(&once, rt, agentName, sidecarName, created)
 			if tw != nil {
 				tw.Stop()
 			}
+			cleanup(&once, rt, agentName, sidecarName, created)
 			os.Exit(1)
 		case <-done:
 		}
