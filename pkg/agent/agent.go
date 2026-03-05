@@ -79,64 +79,40 @@ func SandboxPrompt(agentName string) string {
 
 const sandboxPromptTemplate = `You are running inside a sandboxed container with a read-only rootfs.
 
-## Available tools
-bash, coreutils, ripgrep, jq, podman, docker.
+INVARIANTS — hold these regardless of context length:
+- Native tools: bash, coreutils, ripgrep, jq, podman, docker. Nothing else is installed.
+- No root. No package managers. For any other tool or runtime: build or pull a container image.
+- Only $PWD is writable. $HOME, ~/.cache, /tmp are Landlock-restricted.
+- Network is firewalled; no native curl/wget. HTTP fetches: use a container. On any block: report, never retry.
+- Image tags are mutable. Always resolve digest before running any image.
 
 ## Running containers
-You are NOT root. Package managers (apk, apt) fail at runtime — build images:
+Missing tool — build an image:
 	printf "FROM alpine:3.21\nRUN apk add --no-cache PKG\n" | podman build -t name -
-Built images are cached; subsequent runs are instant.
 
-Mounts restricted to $PWD only:
+Mount $PWD only. No TTY. No "sh -c TOOL args" — pass args directly to entrypoints:
 	podman run --rm -v "$PWD":"$PWD" -w "$PWD" IMAGE [ARGS]
-No TTY — do NOT use -t. Pass args directly to entrypoints, not "sh -c TOOL args".
 
-ALWAYS resolve image digests before running (tags are mutable):
+Resolve digest before every run:
 	podman pull IMAGE:TAG
 	podman image inspect IMAGE:TAG --format '{{.Digest}}'
 	podman run --rm IMAGE@sha256:<digest> ...
+
 Use official Docker Hub images for language runtimes:
-	C#/F#=mcr.microsoft.com/dotnet/sdk,
-	C/C++=gcc,
-	Clojure=clojure
-	Dart=dart,
-	Elixir=elixir
-	Erlang=erlang,
-	Fortran=gcc (gfortran)
-	Go=golang
-	Groovy=groovy
-	Haskell=haskell
-	JS/TS=node
-	Java/Kotlin=eclipse-temurin
-	Julia=julia
-	Nim=nimlang/nim
-	OCaml=ocaml/opam:alpine
-	Obj-C=swift,
-	Octave=gnuoctave/octave
-	PHP=php
-	Perl=perl
-	Python=python
-	R=r-base
-	Ruby=ruby
-	Rust=rust
-	Scala=eclipse-temurin (+ sbt),
-	Swift=swift
-	git=alpine/git.
-	Lua/Zig: build from alpine:3.21.
+	C#/F#=mcr.microsoft.com/dotnet/sdk, C/C++=gcc, Clojure=clojure, Dart=dart,
+	Elixir=elixir, Erlang=erlang, Fortran=gcc (gfortran), Go=golang, Groovy=groovy,
+	Haskell=haskell, JS/TS=node, Java/Kotlin=eclipse-temurin, Julia=julia,
+	Nim=nimlang/nim, OCaml=ocaml/opam:alpine, Obj-C=swift, Octave=gnuoctave/octave,
+	PHP=php, Perl=perl, Python=python, R=r-base, Ruby=ruby, Rust=rust,
+	Scala=eclipse-temurin (+ sbt), Swift=swift, git=alpine/git, Lua/Zig=alpine:3.21.
 For build tools (make, strip, ldd, ar, objdump): use gcc.
-rustup component add <component> cannot install into /usr/local/rustup at runtime (read-only rootfs),
-build an image with those tools if needed. This is true for other language packages too.
-For anything else, build from alpine.
+rustup/language packages requiring install: build an image — read-only rootfs prevents native install.
 
 ## Writable paths
-$HOME, ~/.cache, /tmp are Landlock-restricted. Only $PWD is writable.
 Use $PWD/.{{AGENT}}/ for plans and persistent state (not ~/.{{AGENT}} — read-only).
-
-Container tool caches MUST go under $PWD/.{{AGENT}}/$SANDBOX_SESSION (cleaned on exit).
-Redirect home and cache for every container you run:
+Container caches MUST go under $PWD/.{{AGENT}}/$SANDBOX_SESSION (cleaned on exit):
 	-e HOME="$PWD/.{{AGENT}}/$SANDBOX_SESSION"
 	-e XDG_CACHE_HOME="$PWD/.{{AGENT}}/$SANDBOX_SESSION/cache"
-For language-specific caches, redirect similarly:
 	-e CARGO_HOME="$PWD/.{{AGENT}}/$SANDBOX_SESSION/cargo"
 	-e GOPATH="$PWD/.{{AGENT}}/$SANDBOX_SESSION/go" -e GOCACHE="$PWD/.{{AGENT}}/$SANDBOX_SESSION/go-cache"
 	-e npm_config_cache="$PWD/.{{AGENT}}/$SANDBOX_SESSION/npm-cache"
@@ -144,8 +120,7 @@ For language-specific caches, redirect similarly:
 
 ## Network
 Agent process: deny-all + domain allowlist. Pods: allow-all except private CIDRs.
-For HTTP fetches use:
-	podman run --rm alpine@sha256:<digest> wget -q -O - URL
+HTTP fetches: podman run --rm alpine@sha256:<digest> wget -q -O - URL
 
 If blocked:
 1. Tell user: "Connection to DOMAIN:PORT is blocked by the sandbox firewall."
