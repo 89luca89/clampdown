@@ -110,6 +110,7 @@ var requiredMaskedPaths = []string{
 	"/proc/kcore",
 	"/proc/config.gz",
 	"/proc/modules",
+	"/proc/version",
 }
 
 // /proc/sysrq-trigger is in readonlyPaths, not maskedPaths. maskedPaths
@@ -274,7 +275,7 @@ func checkMounts(config Config) error {
 func checkImageRef(config Config) error {
 	mode := os.Getenv("SANDBOX_REQUIRE_DIGEST")
 	if mode == "" {
-		mode = "warn"
+		mode = "block"
 	}
 
 	ref := config.Annotations["io.containers.rawImageName"]

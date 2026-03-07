@@ -224,6 +224,7 @@ func bootstrapFirewall() error {
 	}
 
 	ip4s, ip6s := classifyIPs(agentIPs)
+	resolver := localResolver()
 
 	for _, bin := range []string{"/usr/sbin/iptables", "/usr/sbin/ip6tables"} {
 		var dests []string
@@ -232,7 +233,7 @@ func bootstrapFirewall() error {
 		} else {
 			dests = ip4s
 		}
-		err := buildAgentChain(bin, agentPolicy, dests)
+		err := buildAgentChain(bin, agentPolicy, dests, resolver)
 		if err != nil {
 			return fmt.Errorf("agent chain (%s): %w", bin, err)
 		}
@@ -247,16 +248,40 @@ func bootstrapFirewall() error {
 	return nil
 }
 
+// localResolver reads /etc/resolv.conf and returns the first nameserver IP.
+// Returns empty string if not found (caller applies no destination filter).
+func localResolver() string {
+	data, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "nameserver") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		ip := net.ParseIP(fields[1])
+		if ip != nil {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
 // buildAgentChain configures filter/OUTPUT for agent egress.
 //
-// deny mode: loopback → established → private CIDRs DROP → DNS ACCEPT →
+// deny mode: loopback → established → private CIDRs DROP → DNS (UDP only,
 //
-//	static TCP 443 per-IP → AGENT_ALLOW → DROP
+//	rate-limited, local resolver) → static TCP 443 per-IP → AGENT_ALLOW → DROP
 //
 // allow mode: loopback → established → AGENT_ALLOW → private CIDRs DROP →
 //
 //	AGENT_BLOCK → ACCEPT
-func buildAgentChain(bin, policy string, staticIPs []string) error {
+func buildAgentChain(bin, policy string, staticIPs []string, resolver string) error {
 	err := ensureChain(bin, "filter", chainAgentAllow)
 	if err != nil {
 		return err
@@ -287,26 +312,39 @@ func buildAgentChain(bin, policy string, staticIPs []string) error {
 				return fmt.Errorf("private %s: %w", cidr, err)
 			}
 		}
-		// DNS (port 53) is always allowed, enabling DNS tunneling
-		// for data exfiltration (dnscat2, iodine). Rate limiting mitigates but
-		// does not eliminate the risk.
-		err = iptRun(bin, "-A", "OUTPUT", "-p", "udp", "--dport", "53",
-			"-m", "limit", "--limit", "10/s", "--limit-burst", "20", "-j", "ACCEPT")
-		if err != nil {
-			return fmt.Errorf("dns udp: %w", err)
+		// DNS: UDP only, rate-limited 3/s burst 5, restricted to local
+		// resolver. TCP DNS blocked entirely — eliminates DNS-over-TCP
+		// tunneling (iodine, dnscat2). Throughput drops from ~50kbps to
+		// <1kbps; most tunneling tools break (need TCP or large TXT).
+		resolverIP := net.ParseIP(resolver)
+		isIPv6 := strings.Contains(bin, "ip6")
+		matchesFamily := resolverIP != nil &&
+			((isIPv6 && resolverIP.To4() == nil) || (!isIPv6 && resolverIP.To4() != nil))
+		if matchesFamily || resolver == "" {
+			dnsArgs := []string{"-A", "OUTPUT", "-p", "udp", "--dport", "53"}
+			if matchesFamily {
+				dnsArgs = append(dnsArgs, "-d", resolver)
+			}
+			dnsArgs = append(dnsArgs, "-m", "limit", "--limit", "3/s", "--limit-burst", "5", "-j", "ACCEPT")
+			err = iptRun(bin, dnsArgs...)
+			if err != nil {
+				return fmt.Errorf("dns udp: %w", err)
+			}
 		}
 		err = iptRun(bin, "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "DROP")
 		if err != nil {
 			return fmt.Errorf("dns udp drop: %w", err)
 		}
-		err = iptRun(bin, "-A", "OUTPUT", "-p", "tcp", "--dport", "53",
-			"-m", "limit", "--limit", "10/s", "--limit-burst", "20", "-j", "ACCEPT")
-		if err != nil {
-			return fmt.Errorf("dns tcp: %w", err)
-		}
 		err = iptRun(bin, "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "DROP")
 		if err != nil {
 			return fmt.Errorf("dns tcp drop: %w", err)
+		}
+		// Cap incoming DNS response size. Responses >512 bytes use EDNS0
+		// extensions exploited by tunneling tools for large TXT records.
+		err = iptRun(bin, "-A", "INPUT", "-p", "udp", "--sport", "53",
+			"-m", "length", "--length", "512:", "-j", "DROP")
+		if err != nil {
+			return fmt.Errorf("dns response cap: %w", err)
 		}
 		for _, dest := range staticIPs {
 			err = iptRun(bin, "-A", "OUTPUT", "-p", "tcp", "--dport", "443", "-d", dest, "-j", "ACCEPT")

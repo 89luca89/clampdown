@@ -71,6 +71,7 @@ var procMaskedPaths = []string{
 	"/proc/kcore",     // Physical memory in ELF format.
 	"/proc/config.gz", // Kernel configuration (reveals security feature status).
 	"/proc/modules",   // Loaded kernel modules (attack surface enumeration).
+	"/proc/version",   // Kernel version string (fingerprinting for exploit selection).
 }
 
 // credentialSpecs defines opt-in host credential forwarding. The launcher

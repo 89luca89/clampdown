@@ -16,6 +16,7 @@ import (
 var UniversalProtectedPaths = []agent.ProtectedPath{
 	{Path: ".clampdownrc", IsDir: false},
 	{Path: ".devcontainer", IsDir: true},
+	{Path: ".env", IsDir: false},
 	{Path: ".envrc", IsDir: false},
 	{Path: ".git/config", IsDir: false},
 	{Path: ".git/hooks", IsDir: true},
