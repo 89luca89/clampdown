@@ -12,19 +12,20 @@ import (
 
 // Config holds user preferences loaded from config.json.
 type Config struct {
-	AgentAllow      string `json:"agent_allow"`
-	AgentPolicy     string `json:"agent_policy"`
-	AllowHooks      bool   `json:"allow_hooks"`
-	CPUs            string `json:"cpus"`
-	DisableTripwire bool   `json:"disable_tripwire"`
-	GH              bool   `json:"gh"`
-	GitConfig       bool   `json:"gitconfig"`
-	Memory          string `json:"memory"`
-	PodPolicy       string `json:"pod_policy"`
-	RegistryAuth    bool   `json:"registry_auth"`
-	RequireDigest   string `json:"require_digest"`
-	Runtime         string `json:"runtime"`
-	SSH             bool   `json:"ssh"`
+	AgentAllow      string   `json:"agent_allow"`
+	AgentPolicy     string   `json:"agent_policy"`
+	AllowHooks      bool     `json:"allow_hooks"`
+	CPUs            string   `json:"cpus"`
+	DisableTripwire bool     `json:"disable_tripwire"`
+	GH              bool     `json:"gh"`
+	GitConfig       bool     `json:"gitconfig"`
+	Memory          string   `json:"memory"`
+	PodPolicy       string   `json:"pod_policy"`
+	ProtectPaths    []string `json:"protect_paths"`
+	RegistryAuth    bool     `json:"registry_auth"`
+	RequireDigest   string   `json:"require_digest"`
+	Runtime         string   `json:"runtime"`
+	SSH             bool     `json:"ssh"`
 }
 
 // LoadConfig reads $XDG_CONFIG_HOME/clampdown/config.json.

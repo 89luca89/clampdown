@@ -40,11 +40,13 @@ type Mount struct {
 	RW  bool
 }
 
-// ProtectedPath is a workdir-relative path that must be
-// read-only inside the agent container.
+// ProtectedPath is a path that must be read-only inside the agent container.
+// GlobalPath paths are resolved against the agent's persistent HOME directory;
+// workdir-relative paths (GlobalPath: false, the default) are resolved against the working directory.
 type ProtectedPath struct {
-	Path  string
-	IsDir bool
+	Path       string
+	IsDir      bool
+	GlobalPath bool // false = workdir-relative (default), true = HOME-relative
 }
 
 var agents = []Agent{

@@ -136,8 +136,12 @@ func Run(args []string) error {
 				Value: cfg.SSH,
 				Usage: "Forward SSH agent socket into tool containers (SSH_AUTH_SOCK)",
 			},
+			&ucli.StringSliceFlag{
+				Name:  "protect",
+				Usage: "Additional paths to protect read-only (repeatable; trailing / = directory)",
+			},
 		},
-		Commands: append(agentCommands(),
+		Commands: append(agentCommands(cfg),
 			&ucli.Command{
 				Name:   "list",
 				Usage:  "List running sandbox sessions",
@@ -255,19 +259,19 @@ func portFlag() *ucli.StringFlag {
 }
 
 // agentCommands generates a subcommand for each registered agent.
-func agentCommands() []*ucli.Command {
+func agentCommands(cfg Config) []*ucli.Command {
 	var cmds []*ucli.Command
 	for _, name := range agent.Available() {
 		cmds = append(cmds, &ucli.Command{
 			Name:   name,
 			Usage:  fmt.Sprintf("Run the %s agent in a sandbox [-- agent-flags...]", name),
-			Action: runAgent(name),
+			Action: runAgent(name, cfg),
 		})
 	}
 	return cmds
 }
 
-func runAgent(agName string) ucli.ActionFunc {
+func runAgent(agName string, cfg Config) ucli.ActionFunc {
 	return func(ctx context.Context, cmd *ucli.Command) error {
 		rt, err := resolveRuntime(cmd)
 		if err != nil {
@@ -302,6 +306,7 @@ func runAgent(agName string) ucli.ActionFunc {
 			GitConfig:       cmd.Bool("gitconfig"),
 			Memory:          cmd.String("memory"),
 			PodPolicy:       cmd.String("pod-policy"),
+			ProtectPaths:    append(cfg.ProtectPaths, cmd.StringSlice("protect")...),
 			RegistryAuth:    cmd.Bool("registry-auth"),
 			RequireDigest:   cmd.String("require-digest"),
 			SSH:             cmd.Bool("ssh"),

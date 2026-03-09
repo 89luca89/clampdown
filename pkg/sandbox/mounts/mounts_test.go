@@ -173,7 +173,7 @@ func TestBuild_ProtectionMounts(t *testing.T) {
 	protection := []agent.ProtectedPath{
 		{Path: ".envrc", IsDir: false},
 	}
-	mnts, created, err := mounts.Build(workdir, ag, protection)
+	mnts, created, err := mounts.Build(workdir, t.TempDir(), t.TempDir(), ag, protection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestBuild_CreatesNonExistingProtectedPaths(t *testing.T) {
 	protection := []agent.ProtectedPath{
 		{Path: ".mcp.json", IsDir: false},
 	}
-	_, created, err := mounts.Build(workdir, ag, protection)
+	_, created, err := mounts.Build(workdir, t.TempDir(), t.TempDir(), ag, protection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestBuild_HostConfigTrue_IncludesMountsAndOverlays(t *testing.T) {
 		overlays: []agent.Mount{{Src: src, Dst: "/home/test/.overlay"}},
 	}
 
-	mnts, _, err := mounts.Build(workdir, ag, nil)
+	mnts, _, err := mounts.Build(workdir, t.TempDir(), t.TempDir(), ag, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestBuild_HostConfigTrue_SkipsMissingSources(t *testing.T) {
 		overlays: []agent.Mount{{Src: "/nonexistent/overlay", Dst: "/dst2"}},
 	}
 
-	mnts, _, err := mounts.Build(workdir, ag, nil)
+	mnts, _, err := mounts.Build(workdir, t.TempDir(), t.TempDir(), ag, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

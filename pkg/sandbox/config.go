@@ -220,6 +220,9 @@ func findAuthFile() string {
 func SidecarProtectedPaths(workdir string, allowHooks bool) []container.MountSpec {
 	var specs []container.MountSpec
 	for _, p := range mounts.MergeProtection(allowHooks) {
+		if p.GlobalPath {
+			continue
+		}
 		abs := filepath.Join(workdir, p.Path)
 		info, err := os.Stat(abs)
 		if err != nil {

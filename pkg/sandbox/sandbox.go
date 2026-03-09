@@ -43,6 +43,7 @@ type Options struct {
 	GitConfig       bool
 	Memory          string
 	PodPolicy       string
+	ProtectPaths    []string
 	RegistryAuth    bool
 	RequireDigest   string
 	SSH             bool
@@ -96,23 +97,28 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 	sidecarName := fmt.Sprintf("%s-%d-sidecar", containerPrefix, pid)
 	agentName := fmt.Sprintf("%s-%d-%s", containerPrefix, pid, ag.Name())
 
-	// Build protection mounts (must happen before cleanup is defined).
-	protection := mounts.MergeProtection(opts.AllowHooks)
-	mnts, created, err := mounts.Build(opts.Workdir, ag, protection)
+	// Write sandbox prompt to persistent HOME before building mounts so
+	// HOME-relative protected paths exist when ProtectMount runs.
+	err = WriteSandboxPrompt(ag, p.Home)
 	if err != nil {
-		for _, p := range created {
-			_ = os.RemoveAll(p)
-		}
-		return fmt.Errorf("build mounts: %w", err)
+		return fmt.Errorf("sandbox prompt: %w", err)
 	}
 
-	// Write sandbox prompt to persistent HOME (idempotent).
-	promptErr := WriteSandboxPrompt(ag, p.Home)
-	if promptErr != nil {
-		for _, p := range created {
-			_ = os.RemoveAll(p)
+	// Build protection mounts (must happen before cleanup is defined).
+	protection := mounts.MergeProtection(opts.AllowHooks)
+	for _, raw := range opts.ProtectPaths {
+		isDir := strings.HasSuffix(raw, "/")
+		protection = append(protection, agent.ProtectedPath{
+			Path:  strings.TrimSuffix(raw, "/"),
+			IsDir: isDir,
+		})
+	}
+	mnts, created, err := mounts.Build(opts.Workdir, p.Home, Home, ag, protection)
+	if err != nil {
+		for _, c := range created {
+			_ = os.RemoveAll(c)
 		}
-		return fmt.Errorf("sandbox prompt: %w", promptErr)
+		return fmt.Errorf("build mounts: %w", err)
 	}
 
 	// Ensure agent TMPDIR exists in persistent HOME (Bun extracts .so here).
