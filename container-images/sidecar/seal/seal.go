@@ -31,7 +31,7 @@ type policy struct {
 	ReadOnly    []string `json:"read_only"`
 	WriteNoExec []string `json:"write_noexec"`
 	WriteExec   []string `json:"write_exec"`
-	ConnectTCP []uint16 `json:"connect_tcp"`
+	ConnectTCP  []uint16 `json:"connect_tcp"`
 }
 
 const policyEnv = "SANDBOX_POLICY"
@@ -59,7 +59,8 @@ const (
 		llsyscall.AccessFSMakeSock |
 		llsyscall.AccessFSMakeFifo |
 		llsyscall.AccessFSMakeSym |
-		llsyscall.AccessFSTruncate
+		llsyscall.AccessFSTruncate |
+		llsyscall.AccessFSIoctlDev
 
 	accessWriteExec = accessWriteNoExec |
 		llsyscall.AccessFSExecute
@@ -69,7 +70,8 @@ const (
 	accessFileReadExec  = accessFileReadOnly | llsyscall.AccessFSExecute
 	accessFileWriteOnly = accessFileReadOnly |
 		llsyscall.AccessFSWriteFile |
-		llsyscall.AccessFSTruncate
+		llsyscall.AccessFSTruncate |
+		llsyscall.AccessFSIoctlDev
 	accessFileWriteExec = accessFileWriteOnly |
 		llsyscall.AccessFSExecute
 )
