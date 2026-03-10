@@ -118,7 +118,9 @@ HOST
 ```
 
 Nested containers (tools the agent launches) get the same workload seccomp +
-Landlock via OCI hooks.
+Landlock via OCI hooks. Protected paths (universal + `--protect`) propagate
+from the sidecar into nested containers via recursive bind mounts (rbind).
+security-policy blocks explicit RW re-mounts of protected paths (check 15).
 
 ## Project Structure
 
@@ -249,8 +251,8 @@ domains. Users must add their AI provider domain via `--agent-allow` (e.g.
   RX) — unaffected.
 - **OCI hooks enforce policy on nested containers.** `seal-inject` (precreate) injects
   sandbox-seal as entrypoint wrapper + derives Landlock policy. `security-policy`
-  (createRuntime) validates caps/namespaces/mounts/devices. Both run for every
-  `podman run` inside the sidecar.
+  (createRuntime, 15 checks) validates caps/namespaces/mounts/devices and blocks RW
+  re-mounts of protected paths. Both run for every `podman run` inside the sidecar.
 - **seal-inject is skipped for build containers** (podman build/buildah don't invoke
   precreate hooks). Build containers still get seccomp_nested.json via containers.conf
   and security-policy via createRuntime hook, but lack Landlock.
@@ -268,6 +270,12 @@ domains. Users must add their AI provider domain via `--agent-allow` (e.g.
   nested containers. Currently: `/var/lib/containers/storage`, `/var/run/containers/storage`,
   `/var/cache/containers`. If rootless podman uses other paths (e.g., `/run/user/*/containers`),
   they must be added here or nested container creation will be blocked by security-policy.
+- **Protected paths propagate into nested containers via rbind.** The sidecar's RO
+  overlays (universal + `--protect`) are carried into nested container workdir mounts
+  by recursive bind (default for podman `-v`). Explicit `-v path:path` overrides this,
+  so `security-policy` check 15 (`checkMountReadonly`) blocks RW re-mounts by reading
+  the sidecar's `/proc/self/mountinfo` to discover RO workdir sub-mounts. No config
+  passing needed — self-describing from the sidecar's own mount state.
 - **The agent shares the sidecar's network namespace.** Egress is controlled by iptables
   chains set up by the entrypoint. Agent: default deny + allowlist. Pods: default allow
   minus private CIDRs.
@@ -313,7 +321,7 @@ cd container-images/sidecar/entrypoint && go test .           # entrypoint IP cl
 Sidecar binaries have their own `go.mod` — run tests with `cd <dir> && go test .`,
 not `go test ./<path>` from root.
 
-**Unit tests cover:** security-policy checks (all 14 pass + fail cases), Landlock
+**Unit tests cover:** security-policy checks (all 15 pass + fail cases), Landlock
 policy derivation, mount classification, mount flag generation, protected path
 logic, IP classification, seccomp profile management, host path filtering, duration
 formatting, env cleanup, path splitting, infra mount detection.

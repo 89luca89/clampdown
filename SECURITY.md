@@ -22,7 +22,7 @@ Clampdown runs an AI coding agent inside a hardened container sandbox. The sandb
 - **Network exfiltration** — iptables default-deny allowlist scoped to required API domains
 - **Privilege escalation** — `cap-drop=ALL`, `no-new-privileges`, seccomp (~115 blocked syscalls)
 - **Host modification** — sidecar UID mapping + host-side inotify tripwire (snapshot + restore)
-- **Nested container breakout** — OCI hooks enforce 14 security checks on every `podman run`
+- **Nested container breakout** — OCI hooks enforce 15 security checks on every `podman run`
 
 For a complete description of all defense layers, see [`DIAGRAM.md`](DIAGRAM.md).
 

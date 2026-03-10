@@ -85,10 +85,10 @@ command. The hook also assigns a non-root UID mapped outside the container's use
 namespace, mounts `hidepid=2` on `/proc`, and injects masked paths over sensitive
 kernel interfaces (`/proc/kcore`, `/proc/sysrq-trigger`, and nine others).
 
-**createRuntime** (`security-policy`): validates the final OCI config against 14
+**createRuntime** (`security-policy`): validates the final OCI config against 15
 security checks — blocking privileged mode, disallowed capabilities, host namespace
-sharing, unsafe bind mounts, and dangerous devices. A container that fails any check
-is killed before its entrypoint runs.
+sharing, unsafe bind mounts, dangerous devices, and RW re-mounts of protected paths.
+A container that fails any check is killed before its entrypoint runs.
 
 Both hooks apply to every `podman run` the agent issues. There is no opt-out.
 
@@ -252,10 +252,13 @@ blocked for both agent and tool containers, regardless of policy.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--allow-hooks` | off | Allow agent to modify `.git/hooks/` (read-only by default) |
+| `--protect` | — | Additional paths to protect read-only (repeatable; trailing `/` = directory) |
 
-Protected paths are always read-only inside the agent, regardless of this flag:
-`.git/config`, `.gitmodules`, `.clampdownrc`, `.devcontainer`, `.envrc`, `.idea`,
-`.mcp.json`, `.vscode`.
+Protected paths are always read-only inside the agent and nested containers, regardless
+of flags: `.git/config`, `.gitmodules`, `.clampdownrc`, `.devcontainer`, `.envrc`,
+`.idea`, `.mcp.json`, `.vscode`. User `--protect` paths get the same enforcement.
+Protected paths propagate into nested containers via recursive bind mounts; explicit
+RW re-mounts are blocked by the security-policy hook.
 
 ### Resources
 

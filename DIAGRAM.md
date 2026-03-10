@@ -40,7 +40,7 @@
 │  │                                                                  │    │
 │  │  OCI Hooks (intercept nested container lifecycle):               │    │
 │  │    precreate:    seal-inject (policy, UID, seal mount, masking)  │    │
-│  │    createRuntime: security-policy (14 checks — see Layer 4)      │    │
+│  │    createRuntime: security-policy (15 checks — see Layer 4)      │    │
 │  │                                                                  │    │
 │  │  ┌─────────────────────────────────────────────────────────┐     │    │
 │  │  │ NESTED CONTAINERS  (podman run/build inside sidecar)    │     │    │
@@ -145,7 +145,7 @@ Layer 4: OCI Hooks (nested containers)
   │    default readonlyPaths. maskedPaths uses /dev/null, and writes
   │    to device nodes bypass ro mount flags (kernel routes to driver).
   │
-  │  createRuntime: security-policy (14 checks)
+  │  createRuntime: security-policy (15 checks)
   │    checkCaps:              18 dangerous capabilities blocked
   │    checkSeccomp:           seccomp=unconfined blocked
   │    checkNoNewPrivileges:   no-new-privileges=false blocked (CVE-2023-0386)
@@ -155,12 +155,13 @@ Layer 4: OCI Hooks (nested containers)
   │    checkMountPropagation:  shared/rshared/slave/rslave blocked (CVE-2025-52881)
   │    checkRootfsPropagation: non-private rootfs propagation blocked
   │    checkDevices:           all device access blocked
-  │    checkMaskedPaths:       unmask of 10 custom masked paths blocked
+  │    checkMaskedPaths:       unmask of 12 custom masked paths blocked
   │    checkReadonlyPaths:     unmask of /proc/sys, /proc/bus, /proc/fs, /proc/irq,
   │                            /proc/sysrq-trigger blocked
   │    checkSysctl:            all kernel parameter changes blocked (CVE-2022-0811)
   │    checkRlimits:           RLIMIT_CORE override blocked (memory disclosure)
   │    checkImageRef:          tag-only image refs warned or blocked
+  │    checkMountReadonly:     RW re-mount of sidecar RO paths blocked
   │
 Layer 5: sandbox-seal (per-process)
   │  Hard-fails if Landlock ABI < V3 (kernel < 6.2)
@@ -438,6 +439,7 @@ podman run ...
 │  12. checkSysctl           → EPERM          │
 │  13. checkRlimits          → EPERM          │
 │  14. checkImageRef         → EACCES/warn    │
+│  15. checkMountReadonly    → EACCES         │
 └──────────────────┬──────────────────────────┘
                    │
      container process starts
