@@ -21,6 +21,7 @@ type Config struct {
 	GitConfig       bool     `json:"gitconfig"`
 	Memory          string   `json:"memory"`
 	PodPolicy       string   `json:"pod_policy"`
+	MaskPaths       []string `json:"mask_paths"`
 	ProtectPaths    []string `json:"protect_paths"`
 	RegistryAuth    bool     `json:"registry_auth"`
 	RequireDigest   string   `json:"require_digest"`

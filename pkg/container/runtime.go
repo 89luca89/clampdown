@@ -72,6 +72,7 @@ type SidecarContainerConfig struct {
 	Name           string
 	Mounts         []MountSpec // Credential forwarding mounts (gitconfig, ssh socket, etc.)
 	ProtectedPaths []MountSpec // Read-only overlays on sensitive workdir paths
+	MaskedPaths    []MountSpec // DevNull/EmptyRO overlays hiding secret content
 	Resources      Resources
 	SeccompProfile string
 	StorageDir     string

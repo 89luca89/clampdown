@@ -140,6 +140,10 @@ func Run(args []string) error {
 				Name:  "protect",
 				Usage: "Additional paths to protect read-only (repeatable; trailing / = directory)",
 			},
+			&ucli.StringSliceFlag{
+				Name:  "mask",
+				Usage: "Paths to mask (content hidden; repeatable; trailing / = directory)",
+			},
 		},
 		Commands: append(agentCommands(cfg),
 			&ucli.Command{
@@ -304,6 +308,7 @@ func runAgent(agName string, cfg Config) ucli.ActionFunc {
 			DisableTripwire: cmd.Bool("disable-tripwire"),
 			GH:              cmd.Bool("gh"),
 			GitConfig:       cmd.Bool("gitconfig"),
+			MaskPaths:       append(cfg.MaskPaths, cmd.StringSlice("mask")...),
 			Memory:          cmd.String("memory"),
 			PodPolicy:       cmd.String("pod-policy"),
 			ProtectPaths:    append(cfg.ProtectPaths, cmd.StringSlice("protect")...),

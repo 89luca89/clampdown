@@ -55,6 +55,15 @@ type ProtectedPath struct {
 	GlobalPath bool // false = workdir-relative (default), true = HOME-relative
 }
 
+// MaskedPath is a workdir-relative path whose content is hidden from the agent.
+// Files are replaced with /dev/null; directories with empty read-only tmpfs.
+// Unlike ProtectedPath (which preserves content as read-only), masked paths
+// show the path exists but reads return nothing.
+type MaskedPath struct {
+	Path  string
+	IsDir bool
+}
+
 var agents = []Agent{
 	&Claude{},
 	&OpenCode{},

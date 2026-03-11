@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/89luca89/clampdown/pkg/agent"
 	"github.com/89luca89/clampdown/pkg/container"
 	"github.com/89luca89/clampdown/pkg/sandbox"
 )
@@ -112,7 +113,7 @@ func TestSidecarProtectedPaths_ExistingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	specs := sandbox.SidecarProtectedPaths(workdir, false, nil)
+	specs := sandbox.SidecarProtectedPaths(workdir, false, nil, nil)
 
 	found := false
 	for _, s := range specs {
@@ -130,24 +131,55 @@ func TestSidecarProtectedPaths_ExistingDir(t *testing.T) {
 
 func TestSidecarProtectedPaths_ExistingFile(t *testing.T) {
 	workdir := t.TempDir()
+	err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o750)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(workdir, ".git", "config"), []byte("[core]"), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	specs := sandbox.SidecarProtectedPaths(workdir, false, nil, nil)
+
+	found := false
+	for _, s := range specs {
+		if s.Dest == filepath.Join(workdir, ".git", "config") {
+			found = true
+			if s.Type != container.Bind || !s.RO {
+				t.Errorf(".git/config: type=%v, RO=%v, want Bind+RO", s.Type, s.RO)
+			}
+		}
+	}
+	if !found {
+		t.Error(".git/config should be in protected paths")
+	}
+}
+
+func TestSidecarMaskedPaths_ExistingFile(t *testing.T) {
+	workdir := t.TempDir()
 	err := os.WriteFile(filepath.Join(workdir, ".envrc"), []byte("SECRET=x"), 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	specs := sandbox.SidecarProtectedPaths(workdir, false, nil)
+	masked := []agent.MaskedPath{{Path: ".envrc"}}
+	specs, created := sandbox.SidecarMaskedPaths(workdir, masked)
 
 	found := false
 	for _, s := range specs {
 		if s.Dest == filepath.Join(workdir, ".envrc") {
 			found = true
-			if s.Type != container.Bind || !s.RO {
-				t.Errorf(".envrc: type=%v, RO=%v, want Bind+RO", s.Type, s.RO)
+			if s.Type != container.DevNull {
+				t.Errorf(".envrc: type=%v, want DevNull", s.Type)
 			}
 		}
 	}
 	if !found {
-		t.Error(".envrc should be in protected paths")
+		t.Error(".envrc should be in masked paths")
+	}
+	if len(created) != 0 {
+		t.Error("existing file should not report as created")
 	}
 }
 
@@ -158,7 +190,7 @@ func TestSidecarProtectedPaths_AllowHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	specs := sandbox.SidecarProtectedPaths(workdir, true, nil)
+	specs := sandbox.SidecarProtectedPaths(workdir, true, nil, nil)
 
 	for _, s := range specs {
 		if s.Dest == filepath.Join(workdir, ".git", "hooks") {
@@ -170,7 +202,7 @@ func TestSidecarProtectedPaths_AllowHooks(t *testing.T) {
 func TestSidecarProtectedPaths_MissingPaths(t *testing.T) {
 	workdir := t.TempDir()
 	// Empty workdir — no .git, no .envrc, nothing.
-	specs := sandbox.SidecarProtectedPaths(workdir, false, nil)
+	specs := sandbox.SidecarProtectedPaths(workdir, false, nil, nil)
 	if len(specs) != 0 {
 		t.Errorf("expected 0 specs for empty workdir, got %d", len(specs))
 	}
@@ -183,7 +215,7 @@ func TestSidecarProtectedPaths_UserExtraDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"secrets/"})
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"secrets/"}, nil)
 
 	found := false
 	for _, s := range specs {
@@ -206,7 +238,7 @@ func TestSidecarProtectedPaths_UserExtraFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"creds.json"})
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"creds.json"}, nil)
 
 	found := false
 	for _, s := range specs {
@@ -225,11 +257,33 @@ func TestSidecarProtectedPaths_UserExtraFile(t *testing.T) {
 func TestSidecarProtectedPaths_UserExtraMissing(t *testing.T) {
 	workdir := t.TempDir()
 	// Path doesn't exist — should be skipped.
-	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"nonexistent"})
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"nonexistent"}, nil)
 
 	for _, s := range specs {
 		if s.Dest == filepath.Join(workdir, "nonexistent") {
 			t.Error("nonexistent path should not appear in protected paths")
+		}
+	}
+}
+
+func TestSidecarProtectedPaths_MaskedExcluded(t *testing.T) {
+	workdir := t.TempDir()
+	// Create a file that would normally be protected.
+	err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o750)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(workdir, ".git", "config"), []byte("[core]"), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	masked := []agent.MaskedPath{{Path: ".git/config"}}
+	specs := sandbox.SidecarProtectedPaths(workdir, false, nil, masked)
+
+	for _, s := range specs {
+		if s.Dest == filepath.Join(workdir, ".git", "config") {
+			t.Error(".git/config should be excluded from protection when masked")
 		}
 	}
 }

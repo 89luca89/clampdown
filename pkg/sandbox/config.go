@@ -46,7 +46,7 @@ func labels(session int, role string, ag agent.Agent, opts Options) map[string]s
 
 func sidecarConfig(
 	name string, session int, opts Options, p ProjectPaths,
-	seccompPath string, ag agent.Agent,
+	seccompPath string, ag agent.Agent, masked []agent.MaskedPath,
 ) container.SidecarContainerConfig {
 	var authFile string
 	if opts.RegistryAuth {
@@ -62,7 +62,7 @@ func sidecarConfig(
 		StorageDir:     p.Storage,
 		CacheDir:       p.Cache,
 		TempDir:        p.Temp,
-		ProtectedPaths: SidecarProtectedPaths(opts.Workdir, opts.AllowHooks, opts.ProtectPaths),
+		ProtectedPaths: SidecarProtectedPaths(opts.Workdir, opts.AllowHooks, opts.ProtectPaths, masked),
 		Capabilities: []string{
 			"CHOWN",
 			"DAC_OVERRIDE",
@@ -239,12 +239,18 @@ func findAuthFile() string {
 // The sidecar's RO overlays also propagate into nested containers via
 // recursive bind mounts (rbind), so nested containers inherit protection
 // without needing seal-inject changes.
-func SidecarProtectedPaths(workdir string, allowHooks bool, extra []string) []container.MountSpec {
+func SidecarProtectedPaths(workdir string, allowHooks bool, extra []string, masked []agent.MaskedPath) []container.MountSpec {
 	paths := mounts.MergeProtection(allowHooks)
 	for _, raw := range extra {
 		paths = append(paths, agent.ProtectedPath{
 			Path: strings.TrimSuffix(raw, "/"),
 		})
+	}
+
+	// Build set of masked paths so we skip them (mask wins over protection).
+	maskedSet := make(map[string]bool, len(masked))
+	for _, m := range masked {
+		maskedSet[filepath.Join(workdir, m.Path)] = true
 	}
 
 	var specs []container.MountSpec
@@ -253,6 +259,9 @@ func SidecarProtectedPaths(workdir string, allowHooks bool, extra []string) []co
 			continue
 		}
 		abs := filepath.Join(workdir, p.Path)
+		if maskedSet[abs] {
+			continue
+		}
 		_, err := os.Stat(abs)
 		if err != nil {
 			continue // doesn't exist, nothing to protect
@@ -264,6 +273,26 @@ func SidecarProtectedPaths(workdir string, allowHooks bool, extra []string) []co
 		})
 	}
 	return specs
+}
+
+// SidecarMaskedPaths builds DevNull/EmptyRO mount specs for sensitive workdir
+// paths in the sidecar container. Creates host placeholders for missing paths
+// so the mount overlay can be applied. Returns specs and created paths for cleanup.
+func SidecarMaskedPaths(workdir string, masked []agent.MaskedPath) ([]container.MountSpec, []string) {
+	var specs []container.MountSpec
+	var created []string
+	for _, m := range masked {
+		abs := filepath.Join(workdir, m.Path)
+		spec, path, err := mounts.MaskMount(abs, m.IsDir)
+		if err != nil || spec == nil {
+			continue
+		}
+		specs = append(specs, *spec)
+		if path != "" {
+			created = append(created, path)
+		}
+	}
+	return specs, created
 }
 
 // WriteSandboxPrompt writes the sandbox instructions to the agent's

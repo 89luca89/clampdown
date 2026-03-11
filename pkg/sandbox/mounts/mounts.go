@@ -20,13 +20,10 @@ import (
 // the launcher writes and agent-native global instruction files.
 var UniversalProtectedPaths = []agent.ProtectedPath{
 	// ---- workdir-relative ----
-	{Path: ".clampdownrc", IsDir: false},
 	{Path: ".claude/CLAUDE.md", IsDir: false},
 	{Path: ".claude/rules", IsDir: true},
 	{Path: ".cursor/rules", IsDir: true},
 	{Path: ".devcontainer", IsDir: true},
-	{Path: ".env", IsDir: false},
-	{Path: ".envrc", IsDir: false},
 	{Path: ".git/config", IsDir: false},
 	{Path: ".git/hooks", IsDir: true},
 	{Path: ".github/copilot-instructions.md", IsDir: false},
@@ -34,8 +31,6 @@ var UniversalProtectedPaths = []agent.ProtectedPath{
 	{Path: ".idea", IsDir: true},
 	{Path: ".mcp.json", IsDir: false},
 	{Path: ".opencode/AGENTS.md", IsDir: false},
-	{Path: ".vscode", IsDir: true},
-	{Path: ".windsurfrules", IsDir: false},
 	{Path: "AGENTS.md", IsDir: false},
 	{Path: "CLAUDE.local.md", IsDir: false},
 	{Path: "CLAUDE.md", IsDir: false},
@@ -46,6 +41,15 @@ var UniversalProtectedPaths = []agent.ProtectedPath{
 	// Agent-native global instruction files auto-discovered from HOME.
 	{Path: ".claude/CLAUDE.md", IsDir: false, GlobalPath: true},
 	{Path: ".claude/rules", IsDir: true, GlobalPath: true},
+}
+
+// UniversalMaskedPaths are paths whose content is hidden from the agent.
+// Files are replaced with /dev/null; directories with empty read-only tmpfs.
+// The agent sees the path exists but reads nothing.
+var UniversalMaskedPaths = []agent.MaskedPath{
+	{Path: ".env"},
+	{Path: ".envrc"},
+	{Path: ".clampdownrc"},
 }
 
 // MergeProtection returns the universal protected paths, removing .git/hooks
@@ -62,7 +66,7 @@ func MergeProtection(allowHooks bool) []agent.ProtectedPath {
 }
 
 // Build returns mount specs and a list of paths created on the host
-// (for non-existing protected paths). The caller must clean up created paths.
+// (for non-existing protected/masked paths). The caller must clean up created paths.
 // hostHome is the agent's persistent HOME directory on the host.
 // containerHome is the path where hostHome is mounted inside the container.
 // Both are used to resolve GlobalPath entries: Source comes from hostHome,
@@ -71,6 +75,7 @@ func MergeProtection(allowHooks bool) []agent.ProtectedPath {
 func Build(
 	workdir, hostHome, containerHome string, ag agent.Agent,
 	protection []agent.ProtectedPath,
+	masked []agent.MaskedPath,
 ) ([]container.MountSpec, []string, error) {
 	var mounts []container.MountSpec
 	var created []string
@@ -80,6 +85,27 @@ func Build(
 		Source: workdir, Dest: workdir, Type: container.Bind,
 	})
 
+	// Track mounted destinations to prevent duplicates (mask wins over protection).
+	mounted := make(map[string]bool)
+
+	// Mask mounts — hide content entirely (DevNull for files, EmptyRO for dirs).
+	// Processed before protection so masks win for shared paths.
+	for _, m := range masked {
+		abs := filepath.Join(workdir, m.Path)
+		spec, path, err := MaskMount(abs, m.IsDir)
+		if err != nil {
+			return nil, created, fmt.Errorf("mask %s: %w", m.Path, err)
+		}
+		if spec == nil {
+			continue
+		}
+		mounts = append(mounts, *spec)
+		mounted[abs] = true
+		if path != "" {
+			created = append(created, path)
+		}
+	}
+
 	// Protection mounts.
 	for _, p := range protection {
 		var abs string
@@ -87,6 +113,9 @@ func Build(
 			abs = filepath.Join(hostHome, p.Path)
 		} else {
 			abs = filepath.Join(workdir, p.Path)
+		}
+		if mounted[abs] {
+			continue // already masked
 		}
 		m, path, err := ProtectMount(abs, p.IsDir)
 		if err != nil {
@@ -162,4 +191,34 @@ func ProtectMount(abs string, isDir bool) (*container.MountSpec, string, error) 
 		return nil, "", err
 	}
 	return &container.MountSpec{Dest: abs, Type: container.DevNull}, abs, nil
+}
+
+// MaskMount returns a mount spec that hides the content of a path.
+// Files get DevNull; directories get EmptyRO. If the path doesn't exist
+// but the parent does, a placeholder is created (returned for cleanup).
+// Returns nil if the parent directory doesn't exist (nothing to mask).
+func MaskMount(abs string, isDir bool) (*container.MountSpec, string, error) {
+	_, err := os.Stat(filepath.Dir(abs))
+	if err != nil {
+		return nil, "", nil //nolint:nilerr // missing parent, skip
+	}
+
+	var created string
+	_, err = os.Stat(abs)
+	if err != nil {
+		if isDir {
+			err = os.Mkdir(abs, 0o750)
+		} else {
+			err = os.WriteFile(abs, nil, 0o600)
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		created = abs
+	}
+
+	if isDir {
+		return &container.MountSpec{Dest: abs, Type: container.EmptyRO}, created, nil
+	}
+	return &container.MountSpec{Dest: abs, Type: container.DevNull}, created, nil
 }

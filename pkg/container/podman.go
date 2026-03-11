@@ -78,6 +78,15 @@ func (p *Podman) StartSidecar(ctx context.Context, cfg SidecarContainerConfig) e
 			args = append(args, "--tmpfs", m.Dest+":ro,size=0,mode=000")
 		}
 	}
+	// Masked paths — DevNull/EmptyRO overlays hiding secret content.
+	for _, m := range cfg.MaskedPaths {
+		switch m.Type {
+		case DevNull:
+			args = append(args, "-v", "/dev/null:"+m.Dest+":ro")
+		case EmptyRO:
+			args = append(args, "--tmpfs", m.Dest+":ro,size=0,mode=000")
+		}
+	}
 	args = append(args,
 		"-v", cfg.StorageDir+":/var/lib/containers/storage:z",
 		"-v", cfg.CacheDir+":/var/lib/containers/cache:z",

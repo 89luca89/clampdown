@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ type Options struct {
 	CPUs            string
 	DisableTripwire bool
 	GH              bool
+	MaskPaths       []string
 	GitConfig       bool
 	Memory          string
 	PodPolicy       string
@@ -113,7 +115,22 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 			IsDir: isDir,
 		})
 	}
-	mnts, created, err := mounts.Build(opts.Workdir, p.Home, Home, ag, protection)
+
+	// Build masked path list (universal + user --mask flags).
+	masked := make([]agent.MaskedPath, len(mounts.UniversalMaskedPaths))
+	copy(masked, mounts.UniversalMaskedPaths)
+	for _, raw := range opts.MaskPaths {
+		masked = append(masked, agent.MaskedPath{
+			Path:  strings.TrimSuffix(raw, "/"),
+			IsDir: strings.HasSuffix(raw, "/"),
+		})
+	}
+
+	// Sidecar masked mounts (creates host placeholders for cleanup).
+	sidecarMasks, maskCreated := SidecarMaskedPaths(opts.Workdir, masked)
+
+	mnts, mountCreated, err := mounts.Build(opts.Workdir, p.Home, Home, ag, protection, masked)
+	created := append(maskCreated, mountCreated...)
 	if err != nil {
 		for _, c := range created {
 			_ = os.RemoveAll(c)
@@ -194,8 +211,9 @@ func Run(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Options
 		}
 	}()
 
-	sidecarCfg := sidecarConfig(sidecarName, pid, opts, p, sidecarSeccomp, ag)
+	sidecarCfg := sidecarConfig(sidecarName, pid, opts, p, sidecarSeccomp, ag, masked)
 	sidecarCfg.Mounts = CredentialMounts(opts)
+	sidecarCfg.MaskedPaths = sidecarMasks
 
 	slog.Info("starting container sidecar")
 	err = rt.StartSidecar(runCtx, sidecarCfg)
@@ -288,8 +306,11 @@ func cleanup(once *sync.Once, rt container.Runtime, agentName, proxyName, sideca
 func waitProxyReady(ctx context.Context, rt container.Runtime, proxyName string) error {
 	for range readinessTimeout {
 		logs, err := rt.Logs(ctx, proxyName)
-		if err == nil && strings.Contains(string(logs), "proxy: ready") {
-			return nil
+		if err == nil {
+			match, err := regexp.MatchString("proxy:.*ready", string(logs))
+			if err == nil && match {
+				return nil
+			}
 		}
 		time.Sleep(time.Second)
 	}
