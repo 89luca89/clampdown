@@ -54,6 +54,16 @@ func baseConfig() Config {
 	c.Linux.MaskedPaths = append([]string{}, requiredMaskedPaths...)
 	c.Linux.ReadonlyPaths = append([]string{}, requiredReadonlyPaths...)
 	c.Linux.RootfsPropagation = "private"
+	c.Process.User.AdditionalGids = []uint32{0, 1, 2, 3, 4, 6, 10, 11, 20, 26, 27}
+	c.Mounts = append(c.Mounts, struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		Source: "proc", Destination: "/proc", Type: "proc",
+		Options: []string{"nosuid", "noexec", "nodev"},
+	})
 	return c
 }
 
@@ -626,6 +636,77 @@ func TestCheckMountReadonly_Pass_NoProtectedPaths(t *testing.T) {
 	}
 }
 
+func TestCheckProcMount_BindBlocked(t *testing.T) {
+	c := baseConfig()
+	// Replace the proc mount with a bind mount.
+	for i, m := range c.Mounts {
+		if m.Destination == "/proc" {
+			c.Mounts[i].Type = "bind"
+			c.Mounts[i].Source = "/host/proc"
+			break
+		}
+	}
+	err := checkProcMount(c)
+	if err == nil {
+		t.Fatal("expected error for bind-mounted /proc")
+	}
+}
+
+func TestCheckProcMount_ProcAllowed(t *testing.T) {
+	c := baseConfig()
+	err := checkProcMount(c)
+	if err != nil {
+		t.Errorf("expected pass for type=proc mount, got: %v", err)
+	}
+}
+
+func TestCheckProcMount_NoProcMount(t *testing.T) {
+	c := baseConfig()
+	// Remove all /proc mounts.
+	var filtered []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}
+	for _, m := range c.Mounts {
+		if m.Destination != "/proc" {
+			filtered = append(filtered, m)
+		}
+	}
+	c.Mounts = filtered
+	err := checkProcMount(c)
+	if err != nil {
+		t.Errorf("expected pass when no /proc mount in spec, got: %v", err)
+	}
+}
+
+func TestCheckAdditionalGids_AllowedSet(t *testing.T) {
+	c := baseConfig()
+	err := checkAdditionalGids(c)
+	if err != nil {
+		t.Errorf("expected pass for default groups, got: %v", err)
+	}
+}
+
+func TestCheckAdditionalGids_Empty(t *testing.T) {
+	c := baseConfig()
+	c.Process.User.AdditionalGids = nil
+	err := checkAdditionalGids(c)
+	if err != nil {
+		t.Errorf("expected pass for empty additionalGids, got: %v", err)
+	}
+}
+
+func TestCheckAdditionalGids_UnexpectedGroup(t *testing.T) {
+	c := baseConfig()
+	c.Process.User.AdditionalGids = append(c.Process.User.AdditionalGids, 999)
+	err := checkAdditionalGids(c)
+	if err == nil {
+		t.Fatal("expected error for unexpected supplementary group 999")
+	}
+}
+
 // TestAllChecksPass verifies a well-formed config passes all checks.
 func TestAllChecksPass(t *testing.T) {
 	t.Setenv("SANDBOX_WORKDIR", "/work")
@@ -650,6 +731,8 @@ func TestAllChecksPass(t *testing.T) {
 		{"rlimits", checkRlimits},
 		{"imageRef", checkImageRef},
 		{"mountReadonly", checkMountReadonly},
+		{"procMount", checkProcMount},
+		{"additionalGids", checkAdditionalGids},
 	}
 	for _, tc := range checks {
 		err := tc.check(c)

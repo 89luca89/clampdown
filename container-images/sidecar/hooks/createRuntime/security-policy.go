@@ -27,7 +27,10 @@ type Config struct {
 	Process     struct {
 		Args            []string `json:"args"`
 		NoNewPrivileges *bool    `json:"noNewPrivileges"`
-		Rlimits         []struct {
+		User            struct {
+			AdditionalGids []uint32 `json:"additionalGids"`
+		} `json:"user"`
+		Rlimits []struct {
 			Type string `json:"type"`
 			Hard uint64 `json:"hard"`
 		} `json:"rlimits"`
@@ -450,6 +453,54 @@ func checkRlimits(config Config) error {
 	return nil
 }
 
+// checkProcMount validates that /proc is mounted as procfs (type "proc"),
+// not as a bind mount. A malicious image could ship /proc as a symlink;
+// if the runtime bind-mounts instead of mounting procfs, path-based
+// security checks on /proc entries can be bypassed (CVE-2023-28642).
+func checkProcMount(config Config) error {
+	for _, m := range config.Mounts {
+		if m.Destination != "/proc" {
+			continue
+		}
+		if m.Type != "proc" {
+			return blocked(int(syscall.EPERM),
+				"/proc mount type is '%s', must be 'proc' (bind-mounted /proc not permitted)",
+				m.Type,
+			)
+		}
+		return nil
+	}
+	return nil // no /proc mount in spec — runtime may add it later
+}
+
+// allowedGids are the default supplementary groups podman assigns to
+// containers from /etc/group (root, bin, daemon, sys, adm, tty, disk,
+// lp, mem, kmem, wheel, cdrom, mail, man, dialout, floppy, games,
+// tape, video, ftp, lock, audio, nobody, users, utmp, utempter, input,
+// kvm, render, sgx, systemd-journal). Only the numeric GIDs that appear
+// in the default OCI config are allowed. This blocks supplementary
+// group escalation (CVE-2022-2989, CVE-2022-2990) where unexpected
+// groups could grant access to files in overlay storage.
+var allowedGids = map[uint32]bool{
+	0: true, 1: true, 2: true, 3: true, 4: true,
+	6: true, 10: true, 11: true, 20: true, 26: true, 27: true,
+}
+
+// checkAdditionalGids validates that supplementary groups in the OCI
+// config are within the allowed set. Rejects containers requesting
+// unexpected groups that could grant unintended file access.
+func checkAdditionalGids(config Config) error {
+	for _, gid := range config.Process.User.AdditionalGids {
+		if !allowedGids[gid] {
+			return blocked(int(syscall.EPERM),
+				"supplementary group %d not in allowed set — unexpected groups not permitted in nested containers",
+				gid,
+			)
+		}
+	}
+	return nil
+}
+
 // checkMaskedPaths verifies that every required sensitive path is hidden
 // by either OCI maskedPaths or a read-only bind mount whose source is
 // /dev/null (for files) or an empty directory (for dirs).
@@ -624,6 +675,8 @@ func main() {
 		checkRlimits,
 		checkImageRef,
 		checkMountReadonly,
+		checkProcMount,
+		checkAdditionalGids,
 	}
 	for _, check := range checks {
 		err = check(config)
