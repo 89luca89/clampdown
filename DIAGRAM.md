@@ -79,7 +79,7 @@
 │  │                                                                  │    │
 │  │  OCI Hooks (intercept nested container lifecycle):               │    │
 │  │    precreate:    seal-inject (policy, UID, seal mount)           │    │
-│  │    createRuntime: security-policy (17 checks)                    │    │
+│  │    createRuntime: security-policy (18 checks)                    │    │
 │  │                                                                  │    │
 │  │  ┌─────────────────────────────────────────────────────────┐     │    │
 │  │  │ NESTED CONTAINERS  (podman run/build inside sidecar)    │     │    │
@@ -309,9 +309,9 @@ for the "proxy: ready" log line, then starts the agent in detached mode.
 If no key is found, the agent starts without a proxy and a warning is
 printed.
 
-All three containers (sidecar, proxy, agent) run with
-`--restart=unless-stopped` -- they persist across terminal disconnects
-and restart automatically on crash. The launcher then attaches to the
+The sidecar and proxy run with `--restart=unless-stopped` and the agent
+with `--restart=on-failure` -- they persist across terminal disconnects
+and the agent restarts automatically on crash. The launcher then attaches to the
 agent container (`podman attach --detach-keys=ctrl-]`). The user can
 detach with `ctrl+]` and reattach later with `clampdown attach -s <id>`.
 
@@ -660,6 +660,7 @@ files.
 | /proc/partitions | file | all* | Partition table |
 | /proc/version | file | all* | Kernel version (exploit selection) |
 | /proc/sysrq-trigger | file | all* | System request trigger (DoS) |
+| /proc/cmdline | file | all* | Boot parameters (KASLR status, kernel config) |
 | /sys/kernel/vmcoreinfo | file | all* | Crash dump format layout |
 | /sys/kernel/debug | dir | nested | ftrace, kprobes |
 | /sys/kernel/tracing | dir | nested | ftrace tracing interface |

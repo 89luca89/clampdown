@@ -415,8 +415,9 @@ clampdown claude --tripwire
 
 All containers run detached. `clampdown claude` starts a session and attaches
 to it. Detach with `ctrl+]` — the session keeps running in the background.
-All containers use `--restart=unless-stopped`: if the agent crashes, it
-restarts automatically. Only `clampdown stop` stops a session.
+The sidecar and proxy use `--restart=unless-stopped` and the agent uses
+`--restart=on-failure`: if the agent crashes, it restarts automatically.
+Only `clampdown stop` stops a session.
 
 ```sh
 # Start a session and attach (default workflow)

@@ -57,6 +57,7 @@ container-images/
       go.mod                     Separate module (stdlib only)
     log/
       log.go                     /log binary: audit trail injection into sidecar stderr
+      go.mod                     Separate module (stdlib only)
     hooks/
       precreate/
         seal-inject.go           Injects sandbox-seal into nested containers, derives Landlock policy

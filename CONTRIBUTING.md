@@ -16,15 +16,17 @@ Bug reports, fixes, and improvements are welcome. This document covers how to co
 
 ## Modules
 
-Clampdown has five Go modules — each built and tested independently:
+Clampdown has seven Go modules — each built and tested independently:
 
 | Module | Location |
 |--------|----------|
 | Launcher | root (`go.mod`) |
 | sandbox-seal | `container-images/sidecar/seal/` |
 | entrypoint | `container-images/sidecar/entrypoint/` |
+| log | `container-images/sidecar/log/` |
 | security-policy | `container-images/sidecar/hooks/createRuntime/` |
 | seal-inject | `container-images/sidecar/hooks/precreate/` |
+| auth-proxy | `container-images/proxy/` |
 
 Run `make all` to build all binaries and container images. Run `make test` to test all modules. 
 Run `make test-integration` to run integration tests.
