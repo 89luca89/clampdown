@@ -23,7 +23,6 @@ var UniversalProtectedPaths = []agent.ProtectedPath{
 	// ---- workdir-relative ----
 	{Path: ".claude/CLAUDE.md", IsDir: false},
 	{Path: ".claude/rules", IsDir: true},
-	{Path: ".codex", IsDir: true},
 	{Path: ".cursor/rules", IsDir: true},
 	{Path: ".devcontainer", IsDir: true},
 	{Path: ".git/config", IsDir: false},
