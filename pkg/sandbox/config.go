@@ -73,7 +73,8 @@ func labels(session string, role string, ag agent.Agent, opts Options) map[strin
 
 func sidecarConfig(
 	name string, session string, opts Options, p ProjectPaths,
-	seccompPath string, ag agent.Agent, masked []agent.MaskedPath,
+	seccompPath string, ag agent.Agent,
+	protectedPaths []container.MountSpec,
 ) container.SidecarContainerConfig {
 	var authFile string
 	if opts.RegistryAuth {
@@ -89,7 +90,7 @@ func sidecarConfig(
 		StorageVolume:  p.Storage,
 		CacheVolume:    p.Cache,
 		TempVolume:     p.Temp,
-		ProtectedPaths: SidecarProtectedPaths(opts.Workdir, opts.AllowHooks, opts.ProtectPaths, masked),
+		ProtectedPaths: protectedPaths,
 		Capabilities: []string{
 			"CHOWN",
 			"DAC_OVERRIDE",
@@ -274,7 +275,8 @@ func SidecarProtectedPaths(
 	paths := mounts.MergeProtection(allowHooks)
 	for _, raw := range extra {
 		paths = append(paths, agent.ProtectedPath{
-			Path: strings.TrimSuffix(raw, "/"),
+			Path:  strings.TrimSuffix(raw, "/"),
+			IsDir: strings.HasSuffix(raw, "/"),
 		})
 	}
 
@@ -294,14 +296,26 @@ func SidecarProtectedPaths(
 			continue
 		}
 		_, err := os.Stat(abs)
-		if err != nil {
-			continue // doesn't exist, nothing to protect
+		if err == nil {
+			// Existing path (file or directory) — bind-mount read-only.
+			// Content stays visible, only writes are blocked.
+			specs = append(specs, container.MountSpec{
+				Source: abs, Dest: abs, RO: true, Type: container.Bind,
+			})
+			continue
 		}
-		// Existing path (file or directory) — bind-mount read-only.
-		// Content stays visible, only writes are blocked.
-		specs = append(specs, container.MountSpec{
-			Source: abs, Dest: abs, RO: true, Type: container.Bind,
-		})
+		// Absent path — check if parent exists. No host placeholder needed:
+		// DevNull and EmptyRO are handled natively by the container runtime.
+		_, parentErr := os.Stat(filepath.Dir(abs))
+		if parentErr != nil {
+			continue
+		}
+		if p.IsDir {
+			specs = append(specs, container.MountSpec{Dest: abs, Type: container.EmptyRO})
+			continue
+		}
+
+		specs = append(specs, container.MountSpec{Dest: abs, Type: container.DevNull})
 	}
 	return specs
 }

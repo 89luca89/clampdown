@@ -117,7 +117,8 @@ func walkAndHash(root string, rootDev uint64) (map[string]execEntry, int) {
 		}
 
 		// Skip if already hashed (multiple paths to same canonical file).
-		if _, exists := entries[canonical]; exists {
+		_, exists := entries[canonical]
+		if exists {
 			return nil
 		}
 

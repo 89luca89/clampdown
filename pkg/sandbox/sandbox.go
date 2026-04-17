@@ -164,10 +164,9 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	// Build protection mounts (must happen before cleanup is defined).
 	protection := mounts.MergeProtection(opts.AllowHooks)
 	for _, raw := range opts.ProtectPaths {
-		isDir := strings.HasSuffix(raw, "/")
 		protection = append(protection, agent.ProtectedPath{
 			Path:  strings.TrimSuffix(raw, "/"),
-			IsDir: isDir,
+			IsDir: strings.HasSuffix(raw, "/"),
 		})
 	}
 
@@ -184,6 +183,10 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 			IsDir: strings.HasSuffix(raw, "/"),
 		})
 	}
+
+	// Sidecar protected paths — computed before mounts.Build so it observes
+	// the real filesystem state, not placeholders created by ProtectMount.
+	sidecarProtected := SidecarProtectedPaths(opts.Workdir, opts.AllowHooks, opts.ProtectPaths, masked)
 
 	// Sidecar masked mounts (creates host placeholders for cleanup).
 	sidecarMasks, maskCreated := SidecarMaskedPaths(opts.Workdir, masked)
@@ -269,7 +272,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 		_ = os.Remove(sessionStatePath(p.State, sessionID)) // Best effort
 	}
 
-	sidecarCfg := sidecarConfig(sidecarName, sessionID, opts, p, sidecarSeccomp, ag, masked)
+	sidecarCfg := sidecarConfig(sidecarName, sessionID, opts, p, sidecarSeccomp, ag, sidecarProtected)
 
 	// SSH agent forwarding requires a native runtime — Unix sockets
 	// cannot cross the VM boundary (virtiofs/9p don't support them).

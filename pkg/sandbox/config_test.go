@@ -211,10 +211,39 @@ func TestSidecarProtectedPaths_AllowHooks(t *testing.T) {
 
 func TestSidecarProtectedPaths_MissingPaths(t *testing.T) {
 	workdir := t.TempDir()
-	// Empty workdir — no .git, no .envrc, nothing.
+	// Empty workdir — paths whose parent is workdir get DevNull/EmptyRO;
+	// paths whose parent doesn't exist (e.g. .git/hooks) are skipped.
 	specs := sandbox.SidecarProtectedPaths(workdir, false, nil, nil)
-	if len(specs) != 0 {
-		t.Errorf("expected 0 specs for empty workdir, got %d", len(specs))
+
+	specMap := make(map[string]container.MountSpec, len(specs))
+	for _, s := range specs {
+		specMap[s.Dest] = s
+	}
+
+	// Absent file with workdir as parent — DevNull.
+	s, ok := specMap[filepath.Join(workdir, ".mcp.json")]
+	if !ok {
+		t.Fatal(".mcp.json should be in specs (absent file, parent exists)")
+	}
+	if s.Type != container.DevNull {
+		t.Errorf(".mcp.json: type=%v, want DevNull", s.Type)
+	}
+
+	// Absent dir with workdir as parent — EmptyRO.
+	s, ok = specMap[filepath.Join(workdir, ".idea")]
+	if !ok {
+		t.Fatal(".idea should be in specs (absent dir, parent exists)")
+	}
+	if s.Type != container.EmptyRO {
+		t.Errorf(".idea: type=%v, want EmptyRO", s.Type)
+	}
+
+	// Absent path with missing parent — skipped.
+	if _, ok = specMap[filepath.Join(workdir, ".git", "hooks")]; ok {
+		t.Error(".git/hooks should be skipped (parent .git doesn't exist)")
+	}
+	if _, ok = specMap[filepath.Join(workdir, ".git", "config")]; ok {
+		t.Error(".git/config should be skipped (parent .git doesn't exist)")
 	}
 }
 
@@ -264,14 +293,52 @@ func TestSidecarProtectedPaths_UserExtraFile(t *testing.T) {
 	}
 }
 
-func TestSidecarProtectedPaths_UserExtraMissing(t *testing.T) {
+func TestSidecarProtectedPaths_UserExtraMissingFile(t *testing.T) {
 	workdir := t.TempDir()
-	// Path doesn't exist — should be skipped.
-	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"nonexistent"}, nil)
+	// Absent file with workdir as parent — DevNull.
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"creds.json"}, nil)
+
+	found := false
+	for _, s := range specs {
+		if s.Dest == filepath.Join(workdir, "creds.json") {
+			found = true
+			if s.Type != container.DevNull {
+				t.Errorf("creds.json: type=%v, want DevNull", s.Type)
+			}
+		}
+	}
+	if !found {
+		t.Error("absent --protect creds.json should be in specs as DevNull")
+	}
+}
+
+func TestSidecarProtectedPaths_UserExtraMissingDir(t *testing.T) {
+	workdir := t.TempDir()
+	// Absent dir with workdir as parent — EmptyRO.
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"secrets/"}, nil)
+
+	found := false
+	for _, s := range specs {
+		if s.Dest == filepath.Join(workdir, "secrets") {
+			found = true
+			if s.Type != container.EmptyRO {
+				t.Errorf("secrets: type=%v, want EmptyRO", s.Type)
+			}
+		}
+	}
+	if !found {
+		t.Error("absent --protect secrets/ should be in specs as EmptyRO")
+	}
+}
+
+func TestSidecarProtectedPaths_MissingParent(t *testing.T) {
+	workdir := t.TempDir()
+	// Parent doesn't exist — should be skipped entirely.
+	specs := sandbox.SidecarProtectedPaths(workdir, false, []string{"missing/child"}, nil)
 
 	for _, s := range specs {
-		if s.Dest == filepath.Join(workdir, "nonexistent") {
-			t.Error("nonexistent path should not appear in protected paths")
+		if s.Dest == filepath.Join(workdir, "missing", "child") {
+			t.Error("path with missing parent should not appear in specs")
 		}
 	}
 }

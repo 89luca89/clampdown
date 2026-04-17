@@ -23,7 +23,8 @@ const (
 func UpdateGitExclude(workdir string, extraProtect, extraMask []string) {
 	// Skip if not a git repo.
 	gitDir := filepath.Join(workdir, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
+	_, err := os.Stat(gitDir)
+	if err != nil {
 		return
 	}
 
@@ -67,7 +68,8 @@ func UpdateGitExclude(workdir string, extraProtect, extraMask []string) {
 
 	// Ensure parent directory exists.
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	err = os.MkdirAll(dir, 0o750)
+	if err != nil {
 		return
 	}
 
