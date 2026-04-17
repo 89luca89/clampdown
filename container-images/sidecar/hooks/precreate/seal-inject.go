@@ -314,6 +314,25 @@ func main() {
 		}
 	}
 
+	// Resolve symlinks in bind mount sources so crun and createRuntime
+	// see the same resolved path — eliminates the TOCTOU window where
+	// a symlink target could change between hook check and mount time.
+	for i, raw := range rawMounts {
+		var m mount
+		if json.Unmarshal(raw, &m) != nil {
+			continue
+		}
+		if m.Type != "bind" || !strings.HasPrefix(m.Source, "/") {
+			continue
+		}
+		resolved, resolveErr := filepath.EvalSymlinks(m.Source)
+		if resolveErr != nil || resolved == m.Source {
+			continue
+		}
+		m.Source = resolved
+		rawMounts[i], _ = json.Marshal(m)
+	}
+
 	sealMount, _ := json.Marshal(mount{
 		Source:      sealBinary,
 		Destination: sealDest,
