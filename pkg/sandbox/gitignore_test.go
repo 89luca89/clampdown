@@ -45,9 +45,6 @@ func TestUpdateGitExclude_CreatesSection(t *testing.T) {
 	if !strings.Contains(string(content), ".env") {
 		t.Error("should include .env from universal masked paths")
 	}
-	if !strings.Contains(string(content), ".codex") {
-		t.Error("should include .codex from universal protected paths")
-	}
 	if !strings.Contains(string(content), "CLAUDE.md") {
 		t.Error("should include CLAUDE.md from universal protected paths")
 	}

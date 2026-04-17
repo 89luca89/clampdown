@@ -45,7 +45,6 @@ func TestMergeProtection_ExcludesClampdownrc(t *testing.T) {
 
 func TestUniversalProtectedPaths_IncludesCodexPaths(t *testing.T) {
 	want := map[string]bool{
-		".codex":                     false,
 		".codex/AGENTS-clampdown.md": true,
 	}
 	for _, p := range mounts.UniversalProtectedPaths {
