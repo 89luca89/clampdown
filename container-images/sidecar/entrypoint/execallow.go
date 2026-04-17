@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -169,6 +170,22 @@ func hashFile(path string) ([32]byte, error) {
 	return sum, nil
 }
 
+func resolveViaProcRoot(path string, pid uint32) string {
+	clean := filepath.Clean(path)
+	root, err := os.Readlink(fmt.Sprintf("/proc/%d/root", pid))
+	if err != nil {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, clean))
+	if err != nil {
+		return ""
+	}
+	if root != "/" && strings.HasPrefix(resolved, root) {
+		return resolved[len(root):]
+	}
+	return resolved
+}
+
 // resolveExecPath resolves a pathname for exec verification.
 // Handles relative paths (via the caller's cwd) and evaluates symlinks.
 func resolveExecPath(raw string, pid uint32) string {
@@ -185,11 +202,7 @@ func resolveExecPath(raw string, pid uint32) string {
 		path = filepath.Join(cwd, path)
 	}
 
-	resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return ""
-	}
-	return resolved
+	return resolveViaProcRoot(path, pid)
 }
 
 // resolveExecveatPath resolves the path for an execveat() syscall.
@@ -215,7 +228,7 @@ func resolveExecveatPath(pid uint32, dirfd, pathnameAddr, flags uint64) string {
 
 	// Absolute path: dirfd is irrelevant.
 	if pathname != "" && pathname[0] == '/' {
-		return evalClean(pathname)
+		return resolveViaProcRoot(pathname, pid)
 	}
 
 	// Relative path: resolve base directory.
@@ -229,7 +242,7 @@ func resolveExecveatPath(pid uint32, dirfd, pathnameAddr, flags uint64) string {
 		return ""
 	}
 
-	return evalClean(filepath.Join(base, pathname))
+	return resolveViaProcRoot(filepath.Join(base, pathname), pid)
 }
 
 // evalFdLink resolves /proc/<pid>/fd/<fd> to a canonical path.
@@ -238,20 +251,7 @@ func evalFdLink(pid uint32, fd uint64) string {
 	if err != nil {
 		return ""
 	}
-	resolved, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return ""
-	}
-	return resolved
-}
-
-// evalClean cleans and resolves symlinks in a path.
-func evalClean(path string) string {
-	resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
-	if err != nil {
-		return ""
-	}
-	return resolved
+	return resolveViaProcRoot(target, pid)
 }
 
 // handleExecve handles execve(pathname, argv, envp) notifications.
@@ -281,7 +281,7 @@ func handleExecve(
 
 	resolved := resolveExecPath(pathname, pid)
 	if resolved == "" {
-		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		resp.Error = -int32(unix.ENOENT)
 		return
 	}
 
@@ -318,7 +318,7 @@ func handleExecveat(
 
 	resolved := resolveExecveatPath(pid, notif.Data.Args[0], notif.Data.Args[1], notif.Data.Args[4])
 	if resolved == "" {
-		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		resp.Error = -int32(unix.ENOENT)
 		return
 	}
 
