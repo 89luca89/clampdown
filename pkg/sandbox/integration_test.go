@@ -78,6 +78,24 @@ func innerPull(image string) []string {
 	return []string{innerPodman, "pull", "--retry", "0", image}
 }
 
+// sidecarExecStdinTimeout runs a command inside the sidecar, piping stdin and
+// forwarding innerEnv. Unlike rt.ExecStdin (which does not pass env vars), this
+// builds the exec command directly so -e flags are included.
+func sidecarExecStdinTimeout(t *testing.T, ctr string, cmd []string, stdin []byte, timeout time.Duration) ([]byte, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	args := []string{"exec", "-i"}
+	for k, v := range innerEnv {
+		args = append(args, "-e", k+"="+v)
+	}
+	args = append(args, ctr)
+	args = append(args, cmd...)
+	c := exec.CommandContext(ctx, rt.Name(), args...)
+	c.Stdin = bytes.NewReader(stdin)
+	return c.CombinedOutput()
+}
+
 // requireFail asserts the command returned a non-zero exit code.
 func requireFail(t *testing.T, out []byte, err error) {
 	t.Helper()
@@ -508,6 +526,33 @@ func TestPositive(t *testing.T) {
 				"sh", "-c", "touch "+workdir+"/integ_test && rm "+workdir+"/integ_test"))
 		requireSuccess(t, out, err)
 	})
+
+	t.Run("build_simple", func(t *testing.T) {
+		t.Parallel()
+		// Builds inside the sidecar must pipe the Containerfile via stdin
+		// (-f -) because file-based builds with a context directory fail
+		// with EPERM from the supervisor's bind-source allowlist.
+		tag := "integ-build-simple"
+		cf := "FROM " + alpineImage + "\nRUN echo hello-from-build > /data.txt\n"
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-t", tag,
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
+		requireSuccess(t, out, err)
+
+		// Run the built image and verify the RUN step executed.
+		out, err = sidecarExec(t, sidecarName, []string{
+			innerPodman, "run", "--rm", tag, "cat", "/data.txt",
+		})
+		requireSuccess(t, out, err)
+		if !bytes.Contains(out, []byte("hello-from-build")) {
+			t.Errorf("expected RUN output, got: %s", out)
+		}
+
+		// Clean up.
+		sidecarExec(t, sidecarName, []string{innerPodman, "rmi", tag})
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +709,56 @@ func TestSecurityPolicy(t *testing.T) {
 		out, err = sidecarExec(t, sidecarName,
 			innerRun([]string{"-v", volPath + ":/escape"}, "ls", "/escape"))
 		requireFail(t, out, err)
+	})
+}
+
+func TestBuildSupervisor(t *testing.T) {
+	t.Parallel()
+
+	// All build tests pipe the Containerfile via stdin (-f -) because
+	// file-based builds with a context directory fail with EPERM from
+	// the supervisor's bind-source allowlist. The -v mounts exercise
+	// the supervisor's bind-source checks during the RUN step.
+	cf := []byte("FROM " + alpineImage + "\nRUN true\n")
+
+	t.Run("bind_etc_passwd_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/etc/passwd:/mounted:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	t.Run("bind_etc_containers_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/etc/containers:/mnt:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	t.Run("bind_hook_dir_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/usr/share/containers/oci/hooks.d:/mnt:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	t.Run("bind_workdir_allowed", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", workdir + ":/work:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+		requireSuccess(t, out, err)
 	})
 }
 
@@ -1290,74 +1385,54 @@ func TestRootfsTampering(t *testing.T) {
 
 	t.Run("build_escalate_full_chain", func(t *testing.T) {
 		t.Parallel()
-		containerfile := strings.Join([]string{
+		cf := strings.Join([]string{
 			"FROM " + alpineImage,
 			"RUN ls -la /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
 			"RUN cat /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
 			"RUN rm -f /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
 			"",
 		}, "\n")
-		cfPath := filepath.Join(workdir, "Containerfile.escalate")
-		if err := os.WriteFile(cfPath, []byte(containerfile), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(cfPath)
-		out, err := sidecarExecTimeout(t, sidecarName, []string{
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
 			"--cap-add", "ALL",
 			"-v", "/:/hostroot",
-			"-f", cfPath, workdir,
-		}, 120*time.Second)
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
 		requireFail(t, out, err)
 	})
 
 	t.Run("build_bind_root_delete_hooks", func(t *testing.T) {
 		t.Parallel()
-		cfPath := filepath.Join(workdir, "Containerfile.delete_hooks")
 		cf := "FROM " + alpineImage + "\nRUN rm -f /hostroot/usr/share/containers/oci/hooks.d/security-policy.json\n"
-		if err := os.WriteFile(cfPath, []byte(cf), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(cfPath)
-		out, err := sidecarExecTimeout(t, sidecarName, []string{
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
 			"-v", "/:/hostroot",
-			"-f", cfPath, workdir,
-		}, 120*time.Second)
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
 		requireFail(t, out, err)
 	})
 
 	t.Run("build_bind_root_overwrite_seccomp", func(t *testing.T) {
 		t.Parallel()
 		// Overwrite seccomp_nested.json to weaken nested container restrictions.
-		cfPath := filepath.Join(workdir, "Containerfile.overwrite_seccomp")
 		cf := "FROM " + alpineImage + "\nRUN echo '{}' > /hostroot/etc/containers/seccomp_nested.json\n"
-		if err := os.WriteFile(cfPath, []byte(cf), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(cfPath)
-		out, err := sidecarExecTimeout(t, sidecarName, []string{
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
 			"-v", "/:/hostroot",
-			"-f", cfPath, workdir,
-		}, 120*time.Second)
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
 		requireFail(t, out, err)
 	})
 
 	t.Run("build_bind_root_modify_containers_conf", func(t *testing.T) {
 		t.Parallel()
 		// Modify containers.conf to disable security defaults.
-		cfPath := filepath.Join(workdir, "Containerfile.modify_conf")
 		cf := "FROM " + alpineImage + "\nRUN echo '[containers]' > /hostroot/etc/containers/containers.conf\n"
-		if err := os.WriteFile(cfPath, []byte(cf), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(cfPath)
-		out, err := sidecarExecTimeout(t, sidecarName, []string{
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
 			"-v", "/:/hostroot",
-			"-f", cfPath, workdir,
-		}, 120*time.Second)
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
 		requireFail(t, out, err)
 	})
 
