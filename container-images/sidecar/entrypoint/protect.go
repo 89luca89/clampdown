@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 func isSubPath(base, path string) bool {
@@ -106,4 +108,29 @@ func parseMountInfo(path, workdir string) map[string]bool {
 	}
 
 	return protected
+}
+
+// maskSensitivePaths masks /proc and /sys files that aid kernel exploit
+// development. Bind-mounts /dev/null over each path. Skips paths that
+// don't exist on this kernel.
+func maskSensitivePaths() {
+	for _, p := range []string{
+		"/proc/cmdline",
+		"/proc/devices",
+		"/proc/diskstats",
+		"/proc/kallsyms",
+		"/proc/kcore",
+		"/proc/modules",
+		"/proc/partitions",
+		"/proc/sysrq-trigger",
+		"/proc/version",
+		"/sys/kernel/vmcoreinfo",
+	} {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := unix.Mount("/dev/null", p, "", unix.MS_BIND, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: mask %s: %v\n", p, err)
+		}
+	}
 }

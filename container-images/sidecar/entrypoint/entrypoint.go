@@ -139,6 +139,10 @@ func main() {
 	// can't modify the UID/GID to escalate privileges.
 	writeSandboxIdentity()
 
+	// Mask sensitive /proc and /sys paths before discovering protected
+	// mounts.
+	maskSensitivePaths()
+
 	workdir := os.Getenv("SANDBOX_WORKDIR")
 	protected := discoverProtectedPaths(workdir)
 	fmt.Fprintf(os.Stderr, "clampdown: %s seccomp-notif: protecting %d mount points\n",

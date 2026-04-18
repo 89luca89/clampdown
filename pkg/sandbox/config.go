@@ -25,23 +25,6 @@ const (
 	ProxyImage   = "ghcr.io/89luca89/clampdown-proxy:latest"
 )
 
-// hardenedMounts masks sensitive /proc and /sys files that aid kernel
-// exploit development. Applied to all clampdown containers (agent and
-// sidecar). Mirrors the volumes list in containers.conf which covers
-// nested containers spawned by the sidecar's inner podman.
-var hardenedMounts = []container.MountSpec{
-	{Dest: "/proc/devices", Type: container.DevNull},
-	{Dest: "/proc/diskstats", Type: container.DevNull},
-	{Dest: "/proc/kallsyms", Type: container.DevNull},
-	{Dest: "/proc/kcore", Type: container.DevNull},
-	{Dest: "/proc/modules", Type: container.DevNull},
-	{Dest: "/proc/partitions", Type: container.DevNull},
-	{Dest: "/proc/version", Type: container.DevNull},
-	{Dest: "/proc/sysrq-trigger", Type: container.DevNull},
-	{Dest: "/sys/kernel/vmcoreinfo", Type: container.DevNull},
-	{Dest: "/proc/cmdline", Type: container.DevNull},
-}
-
 func orDefault(override, def string) string {
 	if override != "" {
 		return override
@@ -157,7 +140,6 @@ func agentConfig(
 		SidecarName:    sidecarName,
 		Workdir:        opts.Workdir,
 		Mounts:         allMounts,
-		MaskedPaths:    hardenedMounts,
 		SeccompProfile: seccompPath,
 		Resources: container.Resources{
 			Memory: opts.Memory, CPUs: opts.CPUs,
@@ -486,7 +468,6 @@ func ProxyConfig(
 		Name:           name,
 		Image:          orDefault(opts.ProxyImage, ProxyImage),
 		Labels:         labels(session, "proxy", ag, opts),
-		MaskedPaths:    hardenedMounts,
 		SidecarName:    sidecarName,
 		Env:            env,
 		SeccompProfile: seccompPath,
