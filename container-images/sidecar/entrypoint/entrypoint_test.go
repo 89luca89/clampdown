@@ -582,7 +582,7 @@ func TestIsAllowedBindSource(t *testing.T) {
 		{"/etc/containers", false},
 		{"/etc/containers/containers.conf", false},
 		{"/usr", false},
-		{"/usr/share/containers/oci/hooks.d", false},
+		{"/usr/share/containers/hooks.d", false},
 		{"/usr/libexec/oci/hooks.d/security-policy", false},
 		{"/bin", false},
 		{"/home/user", false}, // parent of workdir, not under it

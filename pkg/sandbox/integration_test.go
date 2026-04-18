@@ -745,7 +745,7 @@ func TestBuildSupervisor(t *testing.T) {
 		t.Parallel()
 		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
-			"-v", "/usr/share/containers/oci/hooks.d:/mnt:ro",
+			"-v", "/usr/share/containers/hooks.d:/mnt:ro",
 			"-f", "-",
 		}, cf, 120*time.Second)
 		requireFail(t, out, err)
@@ -1387,9 +1387,9 @@ func TestRootfsTampering(t *testing.T) {
 		t.Parallel()
 		cf := strings.Join([]string{
 			"FROM " + alpineImage,
-			"RUN ls -la /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
-			"RUN cat /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
-			"RUN rm -f /hostroot/usr/share/containers/oci/hooks.d/security-policy.json /hostroot/usr/share/containers/oci/hooks.d/seal-inject.json",
+			"RUN ls -la /hostroot/usr/share/containers/hooks.d/security-policy.json /hostroot/usr/share/containers/hooks.d/seal-inject.json",
+			"RUN cat /hostroot/usr/share/containers/hooks.d/security-policy.json /hostroot/usr/share/containers/hooks.d/seal-inject.json",
+			"RUN rm -f /hostroot/usr/share/containers/hooks.d/security-policy.json /hostroot/usr/share/containers/hooks.d/seal-inject.json",
 			"",
 		}, "\n")
 		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
@@ -1403,7 +1403,7 @@ func TestRootfsTampering(t *testing.T) {
 
 	t.Run("build_bind_root_delete_hooks", func(t *testing.T) {
 		t.Parallel()
-		cf := "FROM " + alpineImage + "\nRUN rm -f /hostroot/usr/share/containers/oci/hooks.d/security-policy.json\n"
+		cf := "FROM " + alpineImage + "\nRUN rm -f /hostroot/usr/share/containers/hooks.d/security-policy.json\n"
 		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
 			innerPodman, "build", "--no-cache",
 			"-v", "/:/hostroot",
@@ -1446,7 +1446,7 @@ func TestRootfsTampering(t *testing.T) {
 	t.Run("run_bind_hook_dir_blocked", func(t *testing.T) {
 		t.Parallel()
 		out, err := sidecarExec(t, sidecarName,
-			innerRun([]string{"-v", "/usr/share/containers/oci/hooks.d:/mnt"}, "ls", "/mnt"))
+			innerRun([]string{"-v", "/usr/share/containers/hooks.d:/mnt"}, "ls", "/mnt"))
 		requireFail(t, out, err)
 	})
 
