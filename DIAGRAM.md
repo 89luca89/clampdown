@@ -636,6 +636,23 @@ top of the sidecar profile.
 
 All tiers include Refer (prevents EXDEV). MakeChar/MakeBlock excluded.
 
+### Workdir paths (agent + nested containers)
+
+Two categories are applied to the workdir, distinct from the system-wide
+masks below. Masked paths (`UniversalMaskedPaths`) use a `/dev/null` bind
+for files and an empty bind for directories, applied unconditionally
+whether present or not. Defaults are `.env`, `.envrc`, `.npmrc`, and
+`.clampdownrc`. Protected paths (`UniversalProtectedPaths`) are read-only
+binds if present. Absent files become `/dev/null`, and absent directories
+become an empty read-only bind. Materialization at session start prevents
+host writes from leaking through during the session. Defaults are
+`.git/config`, `.git/hooks`, `.gitmodules`, `.claude`, `.codex`,
+`.devcontainer`, `.idea`, and `.mcp.json`.
+
+Agent and sidecar specs are built from one source of truth so they
+cannot diverge. User `--protect` and `--mask` paths follow the same
+rules. Mask wins over protection if both apply.
+
 ### Masked paths (all containers -- run + build)
 
 Enforced via containers.conf volumes on the sidecar's read-only rootfs.

@@ -30,6 +30,24 @@ Clampdown runs an AI coding agent inside a hardened container sandbox. The sandb
 
 For a complete description of all defense layers, see [`DIAGRAM.md`](DIAGRAM.md).
 
+### Workdir protection model
+
+Two categories of workdir paths are enforced uniformly across the agent
+and nested containers. Masked paths (`UniversalMaskedPaths`) hide content
+unconditionally with a `/dev/null` bind for files or an empty bind for
+directories. Defaults are `.env`, `.envrc`, `.npmrc`, and `.clampdownrc`.
+Protected paths (`UniversalProtectedPaths`) are read-only binds if
+present. If absent at session start they are materialized as `/dev/null`
+for files or an empty read-only bind for directories so content cannot
+appear during the session. Defaults are `.git/config`, `.git/hooks`,
+`.gitmodules`, `.claude`, `.codex`, `.devcontainer`, `.idea`, and
+`.mcp.json`.
+
+Both categories propagate into nested containers via recursive bind.
+The agent and sidecar see identical mount specs, so there is no
+asymmetry where a host write to an absent placeholder could leak
+through.
+
 ## Known limitations
 
 These are accepted design constraints, not bugs. They are disclosed here so users can make informed trust decisions.

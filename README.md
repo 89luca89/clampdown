@@ -352,17 +352,23 @@ blocked for both agent and tool containers, regardless of policy.
 | `--mask` | -- | Additional paths to mask - prevent read (repeatable; trailing `/` = directory) |
 | `--unmask` | -- | Remove paths from the default mask list (e.g. `--unmask .env`) |
 
-Protected paths are always read-only inside the agent and nested containers, regardless
-of flags: `.git/config`, `.git/hooks`, `.gitmodules`, `.claude`, `.codex`,
-`.devcontainer`, `.idea`, `.mcp.json`. User `--protect` paths get the same enforcement.
-Protected paths propagate into nested containers via recursive bind mounts; explicit
-RW re-mounts are blocked by the security-policy hook.
+Workdir paths fall into two categories. Protected paths (`.git/config`,
+`.git/hooks`, `.gitmodules`, `.claude`, `.codex`, `.devcontainer`, `.idea`,
+`.mcp.json`) are read-only if present. If absent at session start they
+are materialized as `/dev/null` for files or an empty read-only bind for
+directories, so content cannot appear during the session. User `--protect`
+paths get the same treatment. Protected paths propagate into nested
+containers via recursive bind, and explicit RW re-mounts are blocked by
+the security-policy hook.
 
-Masked paths are hidden entirely (replaced with `/dev/null`): `.env`, `.envrc`, `.npmrc`,
-`.clampdownrc`. The agent sees the path exists but reads empty content.
+Masked paths (`.env`, `.envrc`, `.npmrc`, `.clampdownrc`) are hidden
+unconditionally with `/dev/null` for files or an empty bind for
+directories, whether the path is present or not. The path appears to
+exist but reads return empty.
 
-Use `--unmask` to selectively restore access (e.g. `--unmask .env` for projects
-that need it). Persistent via `config.json`: `{"unmask_paths": [".env"]}`.
+Use `--unmask` to selectively restore access (for example `--unmask .env`
+for projects that need it). Persistent via `config.json`:
+`{"unmask_paths": [".env"]}`.
 
 ### Resources
 

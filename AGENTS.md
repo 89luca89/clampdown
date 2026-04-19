@@ -67,6 +67,13 @@ Comment types: Function, Design, Why, Teacher, Checklist, Guide. Kill: trivial, 
 
 - No `if x := expr(); x != ...` init-statement syntax. Separate declaration from condition.
 
+### Writing Style
+
+- Do not use arrows, bullet points, or special symbols in the output.
+- Provide the answer in plain text only, avoiding all unicode symbols (like →, ⇒, etc.)
+- Use only alphanumeric characters and standard punctuation.
+- Format the output as a simple paragraph, no arrows or structural markers.
+
 ### Agent Conduct
 
 | Don't | Do |
