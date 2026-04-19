@@ -710,6 +710,39 @@ func TestSecurityPolicy(t *testing.T) {
 			innerRun([]string{"-v", volPath + ":/escape"}, "ls", "/escape"))
 		requireFail(t, out, err)
 	})
+
+	t.Run("checkMounts_volume_local_bind_blocked", func(t *testing.T) {
+		t.Parallel()
+		// Local-bind volume materializes via mount(2) at container start.
+		// Podman calls the syscall directly, so the supervisor's bind
+		// source allowlist (handlers.go allowedBindSources) is the
+		// enforcement point, not the absence of mount(8).
+		out, err := sidecarExec(t, sidecarName,
+			[]string{innerPodman, "volume", "create",
+				"--driver", "local",
+				"--opt", "type=none",
+				"--opt", "o=bind",
+				"--opt", "device=/etc",
+				"integ-test-localbind"})
+		requireSuccess(t, out, err)
+		defer sidecarExec(t, sidecarName,
+			[]string{innerPodman, "volume", "rm", "integ-test-localbind"})
+
+		out, err = sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", "integ-test-localbind:/bound"}, "true"))
+		requireFail(t, out, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		logs, logErr := rt.Logs(ctx, sidecarName)
+		if logErr != nil {
+			t.Fatalf("read sidecar logs: %v", logErr)
+		}
+		want := "BLOCKED mount(MS_BIND) source=/etc"
+		if !strings.Contains(string(logs), want) {
+			t.Fatalf("expected %q in sidecar logs; output:\n%s", want, logs)
+		}
+	})
 }
 
 func TestBuildSupervisor(t *testing.T) {
