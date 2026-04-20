@@ -240,9 +240,9 @@ func checkCaps(config Config) error {
 	return nil
 }
 
-// canonicalSeccompPath is the path to the canonical seccomp profile.
+// clampdownSeccompPath is the path to the clampdown seccomp profile.
 // Overridable in tests.
-var canonicalSeccompPath = "/etc/containers/seccomp_nested.json"
+var clampdownSeccompPath = "/etc/containers/seccomp_nested.json"
 
 // seccompRule represents a single syscall rule for comparison.
 // Two rules match if they have the same action, sorted names, and args.
@@ -261,7 +261,8 @@ type seccompArg struct {
 }
 
 type seccompProfile struct {
-	Syscalls []seccompRule `json:"syscalls"`
+	DefaultAction string        `json:"defaultAction"`
+	Syscalls      []seccompRule `json:"syscalls"`
 }
 
 // seccompRuleKey returns a canonical string key for a rule.
@@ -285,50 +286,68 @@ func checkSeccomp(config Config) error {
 		return blocked(int(syscall.EPERM), "seccomp=unconfined not permitted in nested containers")
 	}
 
-	// Parse the canonical profile to get the set of expected rules.
-	canonicalData, err := os.ReadFile(canonicalSeccompPath)
+	clampdownData, err := os.ReadFile(clampdownSeccompPath)
 	if err != nil {
-		return blocked(int(syscall.EPERM), "cannot read canonical seccomp profile: %v", err)
+		return blocked(int(syscall.EPERM), "cannot read clampdown seccomp profile: %v", err)
 	}
-	var canonicalProfile seccompProfile
-	err = json.Unmarshal(canonicalData, &canonicalProfile)
+	var clampdownProfile seccompProfile
+	err = json.Unmarshal(clampdownData, &clampdownProfile)
 	if err != nil {
-		return blocked(int(syscall.EPERM), "cannot parse canonical seccomp profile: %v", err)
+		return blocked(int(syscall.EPERM), "cannot parse clampdown seccomp profile: %v", err)
 	}
 
-	// Build set of canonical rule keys.
-	canonicalKeys := make(map[string]bool, len(canonicalProfile.Syscalls))
-	for _, r := range canonicalProfile.Syscalls {
-		if len(r.Names) > 0 {
-			canonicalKeys[seccompRuleKey(r)] = true
-		}
-	}
-
-	// Parse the container's profile.
 	var containerProfile seccompProfile
 	err = json.Unmarshal(*config.Linux.Seccomp, &containerProfile)
 	if err != nil {
 		return blocked(int(syscall.EPERM), "invalid seccomp profile: %v", err)
 	}
 
-	// Build set of container rule keys and check every canonical rule is present.
-	containerKeys := make(map[string]bool, len(containerProfile.Syscalls))
-	for _, r := range containerProfile.Syscalls {
-		if len(r.Names) > 0 {
-			containerKeys[seccompRuleKey(r)] = true
+	if containerProfile.DefaultAction != clampdownProfile.DefaultAction {
+		return blocked(int(syscall.EPERM),
+			"seccomp defaultAction '%s' does not match clampdown profile '%s'",
+			containerProfile.DefaultAction, clampdownProfile.DefaultAction)
+	}
+
+	requiredRules := make(map[string]bool, len(clampdownProfile.Syscalls))
+	deniedSyscalls := make(map[string]bool)
+	for _, rule := range clampdownProfile.Syscalls {
+		if len(rule.Names) == 0 {
+			continue
+		}
+		requiredRules[seccompRuleKey(rule)] = true
+		if rule.Action == "SCMP_ACT_ALLOW" {
+			continue
+		}
+		for _, syscallName := range rule.Names {
+			deniedSyscalls[syscallName] = true
 		}
 	}
 
-	var missing []string
-	for key := range canonicalKeys {
-		if !containerKeys[key] {
-			missing = append(missing, key)
+	for _, rule := range containerProfile.Syscalls {
+		if len(rule.Names) == 0 {
+			continue
+		}
+		ruleKey := seccompRuleKey(rule)
+		if requiredRules[ruleKey] {
+			delete(requiredRules, ruleKey)
+			continue
+		}
+		if rule.Action != "SCMP_ACT_ALLOW" {
+			continue
+		}
+		for _, syscallName := range rule.Names {
+			if deniedSyscalls[syscallName] {
+				return blocked(int(syscall.EPERM),
+					"seccomp profile contains extra ALLOW rule for syscall '%s' denied by the clampdown profile",
+					syscallName)
+			}
 		}
 	}
-	if len(missing) > 0 {
+
+	if len(requiredRules) > 0 {
 		return blocked(int(syscall.EPERM),
-			"seccomp profile is missing %d rules from the canonical profile — custom profiles not permitted",
-			len(missing))
+			"seccomp profile is missing %d rules from the clampdown profile: custom profiles not permitted",
+			len(requiredRules))
 	}
 
 	return nil

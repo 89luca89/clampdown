@@ -32,33 +32,33 @@ func TestIsSubPath(t *testing.T) {
 	}
 }
 
-// testCanonicalJSON is the canonical profile used by tests.
-// Both the "canonical file" and the "container profile" use this same JSON
+// testClampdownJSON is the clampdown profile used by tests.
+// Both the "clampdown file" and the "container profile" use this same JSON
 // so the rule-matching check passes.
-const testCanonicalJSON = `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
+const testClampdownJSON = `{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
 	`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
 	`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
 	`{"names":["bpf"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
 	`{"names":["io_uring_setup"],"action":"SCMP_ACT_ERRNO","errnoRet":38}` +
 	`]}`
 
-// setupCanonicalSeccomp creates a temporary canonical seccomp profile and
-// points canonicalSeccompPath at it.
-func setupCanonicalSeccomp(t *testing.T) {
+// setupClampdownSeccomp creates a temporary clampdown seccomp profile and
+// points clampdownSeccompPath at it.
+func setupClampdownSeccomp(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "seccomp_nested.json")
-	if err := os.WriteFile(path, []byte(testCanonicalJSON), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(testClampdownJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	orig := canonicalSeccompPath
-	canonicalSeccompPath = path
-	t.Cleanup(func() { canonicalSeccompPath = orig })
+	orig := clampdownSeccompPath
+	clampdownSeccompPath = path
+	t.Cleanup(func() { clampdownSeccompPath = orig })
 }
 
-// seccompPtr returns a raw JSON profile matching the test canonical.
+// seccompPtr returns a raw JSON profile matching the test clampdown profile.
 func seccompPtr() *json.RawMessage {
-	raw := json.RawMessage(testCanonicalJSON)
+	raw := json.RawMessage(testClampdownJSON)
 	return &raw
 }
 
@@ -120,7 +120,7 @@ func TestCheckCaps_DeniedInAmbient(t *testing.T) {
 }
 
 func TestCheckSeccomp_Unconfined(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
 	c.Linux.Seccomp = nil
 	err := checkSeccomp(c)
@@ -130,7 +130,7 @@ func TestCheckSeccomp_Unconfined(t *testing.T) {
 }
 
 func TestCheckSeccomp_EmptyProfile(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
 	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[]}`)
 	c.Linux.Seccomp = &raw
@@ -141,9 +141,9 @@ func TestCheckSeccomp_EmptyProfile(t *testing.T) {
 }
 
 func TestCheckSeccomp_AllowRulesPadding(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
-	// All ALLOW rules — none match the canonical deny rules.
+	// All ALLOW rules — none match the clampdown deny rules.
 	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
 		`{"names":["mount","umount2"],"action":"SCMP_ACT_ALLOW"},` +
 		`{"names":["bpf"],"action":"SCMP_ACT_ALLOW"},` +
@@ -158,9 +158,9 @@ func TestCheckSeccomp_AllowRulesPadding(t *testing.T) {
 }
 
 func TestCheckSeccomp_MissingRule(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
-	// Has 3 of 4 canonical rules — missing bpf.
+	// Has 3 of 4 clampdown rules — missing bpf.
 	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
 		`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
 		`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
@@ -169,12 +169,12 @@ func TestCheckSeccomp_MissingRule(t *testing.T) {
 	c.Linux.Seccomp = &raw
 	err := checkSeccomp(c)
 	if err == nil {
-		t.Fatal("expected error for profile missing a canonical rule")
+		t.Fatal("expected error for profile missing a clampdown rule")
 	}
 }
 
 func TestCheckSeccomp_InvalidJSON(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
 	raw := json.RawMessage(`not valid json`)
 	c.Linux.Seccomp = &raw
@@ -184,20 +184,20 @@ func TestCheckSeccomp_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestCheckSeccomp_MatchesCanonical(t *testing.T) {
-	setupCanonicalSeccomp(t)
+func TestCheckSeccomp_MatchesClampdown(t *testing.T) {
+	setupClampdownSeccomp(t)
 	c := baseConfig()
-	// seccompPtr() returns exactly the canonical profile.
+	// seccompPtr() returns exactly the clampdown profile.
 	err := checkSeccomp(c)
 	if err != nil {
-		t.Errorf("expected pass for profile matching canonical, got: %v", err)
+		t.Errorf("expected pass for profile matching clampdown profile, got: %v", err)
 	}
 }
 
 func TestCheckSeccomp_SupersetAllowed(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	c := baseConfig()
-	// Canonical rules plus an extra rule — should pass (superset is OK).
+	// Clampdown rules plus an extra rule — should pass (superset is OK).
 	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
 		`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
 		`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
@@ -209,6 +209,65 @@ func TestCheckSeccomp_SupersetAllowed(t *testing.T) {
 	err := checkSeccomp(c)
 	if err != nil {
 		t.Errorf("expected pass for superset profile, got: %v", err)
+	}
+}
+
+func TestCheckSeccomp_DefaultActionMismatch_Rejected(t *testing.T) {
+	setupClampdownSeccomp(t)
+	c := baseConfig()
+	// Clampdown profile defaultAction is SCMP_ACT_ALLOW. KILL_PROCESS
+	// must be rejected even though it looks stricter, because it
+	// would allow extra ALLOW rules to carve exceptions into clampdown
+	// denials.
+	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_KILL_PROCESS","syscalls":[` +
+		`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
+		`{"names":["bpf"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["io_uring_setup"],"action":"SCMP_ACT_ERRNO","errnoRet":38}` +
+		`]}`)
+	c.Linux.Seccomp = &raw
+	err := checkSeccomp(c)
+	if err == nil {
+		t.Fatal("expected error for defaultAction mismatch")
+	}
+}
+
+func TestCheckSeccomp_ExtraAllowForDeniedSyscall_Rejected(t *testing.T) {
+	setupClampdownSeccomp(t)
+	c := baseConfig()
+	// Clampdown rules plus an extra ALLOW bpf. Rejected because bpf
+	// is denied by the clampdown profile and the extra rule would
+	// re-enable it.
+	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
+		`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
+		`{"names":["bpf"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["io_uring_setup"],"action":"SCMP_ACT_ERRNO","errnoRet":38},` +
+		`{"names":["bpf"],"action":"SCMP_ACT_ALLOW"}` +
+		`]}`)
+	c.Linux.Seccomp = &raw
+	err := checkSeccomp(c)
+	if err == nil {
+		t.Fatal("expected error for extra ALLOW bpf rule")
+	}
+}
+
+func TestCheckSeccomp_ExtraAllowForUndeniedSyscall_Allowed(t *testing.T) {
+	setupClampdownSeccomp(t)
+	c := baseConfig()
+	// Clampdown rules plus an extra ALLOW for a name not in the deny
+	// set. Accepted because it does not weaken any clampdown denial.
+	raw := json.RawMessage(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[` +
+		`{"names":["mount","umount2"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["clone"],"action":"SCMP_ACT_ERRNO","errnoRet":1,"args":[{"index":0,"value":268435456,"valueTwo":268435456,"op":"SCMP_CMP_MASKED_EQ"}]},` +
+		`{"names":["bpf"],"action":"SCMP_ACT_ERRNO","errnoRet":1},` +
+		`{"names":["io_uring_setup"],"action":"SCMP_ACT_ERRNO","errnoRet":38},` +
+		`{"names":["some_unrelated_safe_syscall"],"action":"SCMP_ACT_ALLOW"}` +
+		`]}`)
+	c.Linux.Seccomp = &raw
+	err := checkSeccomp(c)
+	if err != nil {
+		t.Errorf("expected pass for safe extra ALLOW rule, got: %v", err)
 	}
 }
 
@@ -928,7 +987,7 @@ func TestCheckAdditionalGids_UnexpectedGroup(t *testing.T) {
 
 // TestAllChecksPass verifies a well-formed config passes all checks.
 func TestAllChecksPass(t *testing.T) {
-	setupCanonicalSeccomp(t)
+	setupClampdownSeccomp(t)
 	t.Setenv("SANDBOX_WORKDIR", "/work")
 	t.Setenv("SANDBOX_REQUIRE_DIGEST", "warn")
 	c := baseConfig()
