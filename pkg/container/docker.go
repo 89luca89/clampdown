@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // dockerDaemonInfo caches parsed fields from `docker info -f json`.
@@ -247,7 +249,11 @@ func (d *Docker) StartAgent(ctx context.Context, cfg AgentContainerConfig) error
 	uid, gid := d.uid(), d.gid()
 	uidGID := uid + ":" + gid
 
-	args := []string{"run", "-d", "-ti", "--name", cfg.Name,
+	ttyFlag := "-ti"
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		ttyFlag = "-i"
+	}
+	args := []string{"run", "-d", ttyFlag, "--name", cfg.Name,
 		"--restart=on-failure",
 		"--user", uidGID,
 		"--network", "container:" + cfg.SidecarName,

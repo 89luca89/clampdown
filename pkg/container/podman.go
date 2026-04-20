@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // Podman implements Runtime for podman.
@@ -196,7 +198,11 @@ func (p *Podman) AttachAgent(ctx context.Context, name string) error {
 }
 
 func (p *Podman) StartAgent(ctx context.Context, cfg AgentContainerConfig) error {
-	args := []string{"run", "-d", "-ti", "--name", cfg.Name,
+	ttyFlag := "-ti"
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		ttyFlag = "-i"
+	}
+	args := []string{"run", "-d", ttyFlag, "--name", cfg.Name,
 		"--restart=on-failure",
 		"--userns=keep-id",
 		"--network", "container:" + cfg.SidecarName,
