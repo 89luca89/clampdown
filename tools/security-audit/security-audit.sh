@@ -2,36 +2,57 @@
 set -euo pipefail
 
 # =============================================================================
-# security-audit-unified.sh - Security audit for single files or entire projects
+# security-audit.sh - Security audit for single files or entire projects
 # =============================================================================
 
 usage()
 {
 	cat << 'EOF'
-Usage: security-audit-unified.sh [OPTIONS]
+Usage: security-audit.sh [OPTIONS]
 
-Security audit using Claude CLI via clampdown.
+Security audit using Claude or Codex CLI via clampdown.
 
 Modes (pick one):
     --file FILE       Audit a single file in depth
     --project [DIR]   Audit entire project (default: current directory)
 
 Options:
-    --dry-run         Print prompts without calling Claude
+    --agent AGENT     Agent CLI to use: claude or codex (default: claude)
+    --dry-run         Write prompts without calling the agent
     -h, --help        Show this help
 
 Environment:
-    MODEL             Model to use (default: claude-opus-4-6[1m])
-    EFFORT            Reasoning effort (default: max)
+    AGENT             Agent CLI to use: claude or codex
+    MODEL             Model override for any agent
+    EFFORT            Reasoning effort override for any agent
+    CLAUDE_MODEL      Claude model override (default: claude-opus-4-6[1m])
+    CLAUDE_EFFORT     Claude effort override (default: max)
+    CODEX_MODEL       Codex model override (default: gpt-5.4)
+    CODEX_EFFORT      Codex effort override (default: xhigh)
+    SIDECAR_IMAGE     Sidecar image (default: clampdown-sidecar:latest)
+    PROXY_IMAGE       Proxy image (default: clampdown-proxy:latest)
+    AGENT_IMAGE       Agent image (default: clampdown-<agent>:latest)
     REPORT_ROOT       Report directory (default: <project>/reports)
+    RESUME_RUN        Reuse an existing run dir; skip analysis, run validation only
+
+Validator (step 2 always runs claude with a 1M-context model):
+    VALIDATOR_MODEL   Validator model   (default: claude-opus-4-6[1m])
+    VALIDATOR_EFFORT  Validator effort  (default: max)
+    VALIDATOR_IMAGE   Validator image   (default: clampdown-claude:latest)
 EOF
 }
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-MODEL="${MODEL:-"claude-opus-4-6[1m]"}"
-EFFORT="${EFFORT:-max}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(realpath "$SCRIPT_DIR/../..")"
+
+AGENT="${AGENT:-claude}"
+MODEL="${MODEL:-}"
+EFFORT="${EFFORT:-}"
+SIDECAR_IMAGE="${SIDECAR_IMAGE:-clampdown-sidecar:latest}"
+PROXY_IMAGE="${PROXY_IMAGE:-clampdown-proxy:latest}"
 DRY_RUN=false
 MODE=""
 TARGET_FILE=""
@@ -54,6 +75,10 @@ while [[ $# -gt 0 ]]; do
 				shift
 			fi
 			;;
+		--agent)
+			AGENT="$2"
+			shift 2
+			;;
 		--dry-run)
 			DRY_RUN=true
 			shift
@@ -70,6 +95,33 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+case "$AGENT" in
+	claude)
+		MODEL="${MODEL:-${CLAUDE_MODEL:-"claude-opus-4-6[1m]"}}"
+		EFFORT="${EFFORT:-${CLAUDE_EFFORT:-max}}"
+		;;
+	codex)
+		MODEL="${MODEL:-${CODEX_MODEL:-gpt-5.4}}"
+		EFFORT="${EFFORT:-${CODEX_EFFORT:-xhigh}}"
+		if [[ $EFFORT == "max" ]]; then
+			EFFORT="xhigh"
+		fi
+		;;
+	*)
+		echo "Error: Unsupported agent: $AGENT" >&2
+		usage
+		exit 1
+		;;
+esac
+
+AGENT_IMAGE="${AGENT_IMAGE:-clampdown-${AGENT}:latest}"
+
+# Validator — always claude with 1M context, regardless of --agent.
+VALIDATOR_AGENT="claude"
+VALIDATOR_MODEL="${VALIDATOR_MODEL:-claude-opus-4-6[1m]}"
+VALIDATOR_EFFORT="${VALIDATOR_EFFORT:-max}"
+VALIDATOR_IMAGE="${VALIDATOR_IMAGE:-clampdown-${VALIDATOR_AGENT}:latest}"
+
 if [[ -z $MODE ]]; then
 	echo "Error: Must specify --file or --project" >&2
 	usage
@@ -79,8 +131,8 @@ fi
 # Resolve paths
 if [[ $MODE == "file" ]]; then
 	[[ ! -f $TARGET_FILE ]] && {
-		echo   "File not found: $TARGET_FILE" >&2
-		exit                                            1
+		echo "File not found: $TARGET_FILE" >&2
+		exit            1
 	}
 	TARGET_FILE="$(realpath "$TARGET_FILE")"
 	PROJECT_DIR="$(dirname "$TARGET_FILE")"
@@ -126,43 +178,130 @@ get_validated_summary()
 	fi
 }
 
-call_claude()
+# extract_json_array <input_log> <output_json>
+# Pulls a JSON array out of the model's stdout log. Tries, in order:
+#   1. <output>…</output> tags (what the validation prompt asks for)
+#   2. ```json fenced block
+#   3. any ``` fenced block
+#   4. whole file parsed as JSON
+# Returns 0 on success, 1 if no valid JSON found.
+extract_json_array()
+{
+	local input="$1"
+	local output="$2"
+
+	awk '
+		/<output>/ {
+			p = index($0, "<output>")
+			line = substr($0, p + length("<output>"))
+			q = index(line, "</output>")
+			if (q > 0) { print substr(line, 1, q - 1); exit }
+			print line
+			f = 1
+			next
+		}
+		f {
+			q = index($0, "</output>")
+			if (q > 0) { print substr($0, 1, q - 1); exit }
+			print
+		}
+	' "$input" > "$output"
+	if [[ -s $output ]] && jq empty "$output" 2> /dev/null; then
+		return 0
+	fi
+
+	awk '/^```json[[:space:]]*$/ {f=1; next} /^```[[:space:]]*$/ {if (f) exit} f' \
+		"$input" > "$output"
+	if [[ -s $output ]] && jq empty "$output" 2> /dev/null; then
+		return 0
+	fi
+
+	awk '/^```/{f=!f; next} f' "$input" > "$output"
+	if [[ -s $output ]] && jq empty "$output" 2> /dev/null; then
+		return 0
+	fi
+
+	if jq empty "$input" 2> /dev/null; then
+		cp "$input" "$output"
+		return 0
+	fi
+
+	return 1
+}
+
+# call_agent <prompt> <output_file> <agent> <model> <effort> <image>
+call_agent()
 {
 	local prompt="$1"
 	local output_file="$2"
+	local agent="$3"
+	local model="$4"
+	local effort="$5"
+	local image="$6"
 
 	local prompt_file="${output_file}.prompt.txt"
 	echo "$prompt" > "$prompt_file"
 
 	if [[ $DRY_RUN == "true" ]]; then
-		log "[DRY-RUN] Would call Claude with ${#prompt} char prompt"
+		log "[DRY-RUN] Would call $agent ($model) with ${#prompt} char prompt"
 		echo "(dry run)" > "$output_file"
 		return 0
 	fi
 
-	"$(dirname "$0")"/../../clampdown claude \
-		--sidecar-image clampdown-sidecar:latest \
-		--proxy-image clampdown-proxy:latest \
-		--agent-image clampdown-claude:latest \
-		-- \
-		--dangerously-skip-permissions \
-		--model "$MODEL" \
-		--effort "$EFFORT" \
-		--print --output-format text --verbose \
-		-p "$(cat "$prompt_file")" | tee "$output_file"
+	# Mask project instruction files so the audit agent runs autonomously
+	# instead of obeying repo-level rules like "Plan before execute" /
+	# "Approve before apply" that would otherwise block unattended runs.
+	local mask_flags=(--mask AGENTS.md --mask CLAUDE.md)
+
+	case "$agent" in
+		claude)
+			"$ROOT_DIR/clampdown" "$agent" \
+				--sidecar-image "$SIDECAR_IMAGE" \
+				--proxy-image "$PROXY_IMAGE" \
+				--agent-image "$image" \
+				"${mask_flags[@]}" \
+				-w "$PROJECT_DIR" \
+				-- \
+				--dangerously-skip-permissions \
+				--model "$model" \
+				--effort "$effort" \
+				--print --input-format text \
+				--output-format text --verbose -p "$prompt_file" | tee "$output_file"
+			;;
+		codex)
+			"$ROOT_DIR/clampdown" "$agent" \
+				--sidecar-image "$SIDECAR_IMAGE" \
+				--proxy-image "$PROXY_IMAGE" \
+				--agent-image "$image" \
+				"${mask_flags[@]}" \
+				-w "$PROJECT_DIR" \
+				-- \
+				exec \
+				--model "$model" \
+				-c "model_reasoning_effort=\"$effort\"" \
+				--skip-git-repo-check \
+				--color never \
+				- < "$prompt_file" | tee "$output_file"
+			;;
+	esac
 }
 
 # -----------------------------------------------------------------------------
-# Gather file list for @ imports
+# Gather file list for agent-specific imports
 # -----------------------------------------------------------------------------
 gather_file_imports()
 {
 	local mode="$1"
+	local import_prefix=""
+
+	if [[ $AGENT == "claude" ]]; then
+		import_prefix="@"
+	fi
 
 	if [[ $mode == "file" ]]; then
-		echo "@$TARGET_FILE"
+		printf '%s%s\n' "$import_prefix" "$TARGET_FILE"
 	else
-		# Find all source files, output as @path for Claude import
+		# Find all source files. Claude gets @path imports; Codex gets paths.
 		find "$PROJECT_DIR" \
 			-type d -name '.*' -prune -o \
 			-type d -name 'vendor' -prune -o \
@@ -177,7 +316,9 @@ gather_file_imports()
 			-name '*.java' -o \
 			-name '*.rb' -o \
 			-name '*.sh' \
-			\) -print 2> /dev/null | sort | sed 's/^/@/'
+			\) -print 2> /dev/null | sort | while IFS= read -r path; do
+			printf '%s%s\n' "$import_prefix" "$path"
+		done
 	fi
 }
 
@@ -193,6 +334,15 @@ run_analysis()
 	local prompt
 	prompt=$(
 		cat << EOF
+## Automated execution — this task supersedes repo-level rules
+
+You are running non-interactively inside a script. For THIS task only:
+- Do NOT ask for approval, clarification, or confirmation.
+- Do NOT present options, alternatives, or plans.
+- Execute the instructions below and write the output as specified.
+
+---
+
 You are performing a security audit of: $target_desc
 
 ## Code to Audit
@@ -275,7 +425,8 @@ Only report REAL, exploitable vulnerabilities - not theoretical concerns or hard
 EOF
 	)
 
-	call_claude "$prompt" "$run_dir/report.md"
+	call_agent "$prompt" "$run_dir/report.md" \
+		"$AGENT" "$MODEL" "$EFFORT" "$AGENT_IMAGE"
 }
 
 # -----------------------------------------------------------------------------
@@ -289,99 +440,69 @@ run_validation()
 	local report
 	report=$(cat "$run_dir/report.md")
 
-	local json_relpath="${run_dir#$PWD/}/validation.json"
-
 	local prompt
 	prompt=$(
-		cat << EOF
-You are a strict security validator. Your job is to REJECT false positives and duplicates.
+		cat << 'HDR'
+You are an automated validation function. Your ONLY output is a JSON array
+wrapped in <output>…</output> tags. No prose. No questions. No tool calls.
 
-## Report to Validate
+EXAMPLE of the EXACT format required (structure, not values):
+
+<output>
+[
+  {
+    "finding": 1,
+    "title": "Short title of the finding",
+    "decision": "ACCEPT" or "REJECT",
+    "duplicate_check": {"is_duplicate": false, "matches_existing": null, "reasoning": "explanation"},
+    "bug_exists":     {"has_location": true, "has_concrete_trigger": true, "is_real_vulnerability": true, "reasoning": "explanation"},
+    "exploitability": {"reachable": true, "realistic_prereqs": true, "poc_works": true, "reasoning": "explanation"},
+    "severity": "Critical|High|Medium|Low|Invalid",
+    "confidence": "high|medium|low",
+    "summary": "one-sentence verdict"
+  }
+]
+</output>
+
+If the report contains no findings, output: <output>[]</output>
+
+## Checklist (apply to each finding)
+
+1. Duplicate against existing validated findings?     → REJECT
+   (same file AND same vulnerable code path, or same root cause)
+2. Missing exact file/line numbers or vulnerable code? → REJECT
+3. No concrete trigger (only "an attacker could…")?    → REJECT
+4. Unreachable / unrealistic prereqs / PoC wouldn't work? → REJECT
+5. Severity exaggerated? → downgrade
+
+Default REJECT. ACCEPT only if ALL checks pass.
+HDR
+		cat << EOF
+
+## Report to validate
+
 $report
 
-## Existing Validated Findings (check for duplicates)
+## Existing validated findings (for duplicate check)
+
 $validated_summary
-
-## Validation Checklist
-
-### 1. Duplicate Check
-Compare against ALL existing findings. Reject if:
-- Same file AND same vulnerable code path
-- Same vulnerability class in same component
-- Same root cause (even with different wording)
-
-### 2. Bug Exists Check
-The report MUST have:
-- Exact file path and line numbers
-- Actual vulnerable code shown
-- Concrete trigger (not "an attacker could...")
-
-REJECT if you see:
-- Vague language ("may lead to", "could potentially")
-- No specific line numbers
-- Speculation without demonstrated exploitation
-- Hardening suggestion disguised as vulnerability
-
-### 3. Exploitability Check
-- Code path is reachable (not dead code)
-- Prerequisites are realistic (default config)
-- PoC would actually work
-
-### 4. Severity Check
-- Is the severity accurate or exaggerated?
-- Would this get a CVE or is it just a suggestion?
-
-## Output
-
-Write a JSON file to: $json_relpath
-
-Use your Write tool to write the file. The file must contain a JSON array with one
-element per finding in the report. If the report contains no findings, write [].
-
-Each element:
-{
-  "finding": 1,
-  "title": "Short title of the finding",
-  "decision": "ACCEPT" or "REJECT",
-  "duplicate_check": {
-    "is_duplicate": true/false,
-    "matches_existing": "filename or null",
-    "reasoning": "explanation"
-  },
-  "bug_exists": {
-    "has_location": true/false,
-    "has_concrete_trigger": true/false,
-    "is_real_vulnerability": true/false,
-    "reasoning": "explanation"
-  },
-  "exploitability": {
-    "reachable": true/false,
-    "realistic_prereqs": true/false,
-    "poc_works": true/false,
-    "reasoning": "explanation"
-  },
-  "severity": "Critical/High/Medium/Low/Invalid",
-  "confidence": "high/medium/low",
-  "summary": "one sentence verdict"
-}
-
-Default to REJECT. Only ACCEPT if ALL checks pass.
 EOF
+		cat << 'TAIL'
+
+OUTPUT NOW. JSON array inside <output>…</output>. Nothing else.
+TAIL
 	)
 
-	call_claude "$prompt" "$run_dir/validation.log"
+	call_agent "$prompt" "$run_dir/validation.log" \
+		"$VALIDATOR_AGENT" "$VALIDATOR_MODEL" "$VALIDATOR_EFFORT" "$VALIDATOR_IMAGE"
 
 	if [[ $DRY_RUN == "true" ]]; then
+		echo "[]" > "$run_dir/validation.json"
 		return 0
 	fi
 
-	if [[ ! -f "$run_dir/validation.json" ]]; then
-		log "ERROR: Model did not write $json_relpath"
-		return 1
-	fi
-
-	if ! jq empty "$run_dir/validation.json" 2> /dev/null; then
-		log "ERROR: $json_relpath is not valid JSON"
+	if ! extract_json_array "$run_dir/validation.log" "$run_dir/validation.json"; then
+		log "ERROR: no valid JSON array found in $run_dir/validation.log"
 		return 1
 	fi
 }
@@ -393,43 +514,62 @@ main()
 {
 	ensure_dirs
 
-	local run_id
-	run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
-	local run_dir="$RUNS_DIR/$run_id"
-	mkdir -p "$run_dir"
+	local run_id run_dir resuming=false
+	if [[ -n ${RESUME_RUN:-} ]]; then
+		run_id="$RESUME_RUN"
+		run_dir="$RUNS_DIR/$run_id"
+		[[ -d $run_dir ]] || {
+			echo "RESUME_RUN: run dir not found: $run_dir" >&2
+			exit 1
+		}
+		[[ -s "$run_dir/report.md" ]] || {
+			echo "RESUME_RUN: $run_dir/report.md missing or empty" >&2
+			exit 1
+		}
+		resuming=true
+	else
+		run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
+		run_dir="$RUNS_DIR/$run_id"
+		mkdir -p "$run_dir"
+	fi
 
 	log "Run: $run_id"
+	$resuming && log "Resuming: skipping analysis, using existing report.md"
 	log "Mode: $MODE"
+	log "Agent: $AGENT"
 	log "Model: $MODEL (effort: $EFFORT)"
+	log "Validator: $VALIDATOR_AGENT $VALIDATOR_MODEL (effort: $VALIDATOR_EFFORT)"
 	log "Project: $PROJECT_DIR"
 	log "Reports: $REPORT_ROOT"
 
 	local validated_summary
 	validated_summary=$(get_validated_summary)
 
-	local file_imports target_desc file_count
+	if ! $resuming; then
+		local file_imports target_desc file_count
 
-	if [[ $MODE == "file" ]]; then
-		local rel_path="${TARGET_FILE#$PROJECT_DIR/}"
-		log "Target: $rel_path"
-		target_desc="Single file: $rel_path"
-		file_imports=$(gather_file_imports "file")
-		file_count=1
-	else
-		log "Target: entire project"
-		target_desc="Entire project at $PROJECT_DIR"
-		file_imports=$(gather_file_imports "project")
-		file_count=$(echo "$file_imports" | wc -l)
-		log "Found $file_count source files"
+		if [[ $MODE == "file" ]]; then
+			local rel_path="${TARGET_FILE#$PROJECT_DIR/}"
+			log "Target: $rel_path"
+			target_desc="Single file: $rel_path"
+			file_imports=$(gather_file_imports "file")
+			file_count=1
+		else
+			log "Target: entire project"
+			target_desc="Entire project at $PROJECT_DIR"
+			file_imports=$(gather_file_imports "project")
+			file_count=$(echo "$file_imports" | wc -l)
+			log "Found $file_count source files"
+		fi
+
+		# Save file list for reference
+		echo "$file_imports" > "$run_dir/files.txt"
+
+		# Step 1: Analysis
+		log "Step 1: Analysis"
+		run_analysis "$run_dir" "$file_imports" "$target_desc"
+		log "Analysis complete"
 	fi
-
-	# Save file list for reference
-	echo "$file_imports" > "$run_dir/files.txt"
-
-	# Step 1: Analysis
-	log "Step 1: Analysis"
-	run_analysis "$run_dir" "$file_imports" "$target_desc"
-	log "Analysis complete"
 
 	# Step 2: Validation
 	log "Step 2: Validation"
@@ -441,41 +581,11 @@ main()
 
 	if [[ $total -eq 0 ]]; then
 		log "No findings in report"
+		exit
 	fi
 
-	local i
-	for ((i = 0; i < total; i++)); do
-		local decision title severity summary
-		decision=$(jq -r ".[$i].decision // \"REJECT\"" "$run_dir/validation.json")
-		title=$(jq -r ".[$i].title // \"finding-$((i + 1))\"" "$run_dir/validation.json")
-		severity=$(jq -r ".[$i].severity // \"Unknown\"" "$run_dir/validation.json")
-		summary=$(jq -r ".[$i].summary // \"no reason\"" "$run_dir/validation.json")
-
-		if [[ $decision == "ACCEPT" ]]; then
-			accepted=$((accepted + 1))
-			local slug
-			slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')
-			local ts
-			ts=$(date -u +%Y%m%dT%H%M%SZ)
-			cp "$run_dir/report.md" "$VALIDATED_DIR/${ts}-${slug}.md"
-			log "ACCEPTED [$severity] #$((i + 1)): $title -> ${ts}-${slug}.md"
-		else
-			rejected=$((rejected + 1))
-			local is_dup
-			is_dup=$(jq -r ".[$i].duplicate_check.is_duplicate // false" "$run_dir/validation.json")
-			if [[ $is_dup == "true" ]]; then
-				local matches
-				matches=$(jq -r ".[$i].duplicate_check.matches_existing // \"unknown\"" "$run_dir/validation.json")
-				log "REJECTED [DUPLICATE of $matches] #$((i + 1)): $title - $summary"
-			else
-				log "REJECTED #$((i + 1)): $title - $summary"
-			fi
-		fi
-	done
-
-	log "$accepted accepted, $rejected rejected out of $total findings"
-
-	log "Done. Artifacts in $run_dir"
+	jq -r . "$run_dir/validation.json" > "$VALIDATED_DIR/$(date -u +%Y%m%dT%H%M%SZ).json"
+	log "Done. Artifacts in $VALIDATED_DIR/$(date -u +%Y%m%dT%H%M%SZ).json"
 }
 
 main "$@"

@@ -253,8 +253,8 @@ audit-escape: all
 # Full project audit: holistic analysis, then file-by-file sweep
 audit-project:
 	@echo "=== Holistic project audit ==="
-	@./tools/security-audit/security-audit.sh --project .
+	@AGENT=$(AUDIT_AGENT) ./tools/security-audit/security-audit.sh --project .
 
 audit-project-files:
 	@echo "=== File-by-file sweep ==="
-	@find pkg/ container-images/ -type f -print0 | xargs -0 file --mime-type | grep text | cut -d: -f1 | xargs -I{} ./tools/security-audit/security-audit.sh --file {}
+	@find pkg/ container-images/ -type f -print0 | xargs -0 file --mime-type | grep text | cut -d: -f1 | xargs -I{} env AGENT=$(AUDIT_AGENT) ./tools/security-audit/security-audit.sh --file {}
