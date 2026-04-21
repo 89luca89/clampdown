@@ -170,34 +170,34 @@ func hashFile(path string) ([32]byte, error) {
 	return sum, nil
 }
 
-func resolveViaProcRoot(path string, pid uint32) string {
+func resolveViaProcRoot(path string, pid uint32) (string, error) {
 	clean := filepath.Clean(path)
 	root, err := os.Readlink(fmt.Sprintf("/proc/%d/root", pid))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(filepath.Join(root, clean))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	if root != "/" && strings.HasPrefix(resolved, root) {
-		return resolved[len(root):]
+		return resolved[len(root):], nil
 	}
-	return resolved
+	return resolved, nil
 }
 
 // resolveExecPath resolves a pathname for exec verification.
 // Handles relative paths (via the caller's cwd) and evaluates symlinks.
-func resolveExecPath(raw string, pid uint32) string {
+func resolveExecPath(raw string, pid uint32) (string, error) {
 	if raw == "" {
-		return ""
+		return "", nil
 	}
 
 	path := raw
 	if path[0] != '/' {
 		cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 		if err != nil {
-			return ""
+			return "", err
 		}
 		path = filepath.Join(cwd, path)
 	}
@@ -215,10 +215,10 @@ func resolveExecPath(raw string, pid uint32) string {
 //   - Absolute pathname: dirfd ignored.
 //   - dirfd == AT_FDCWD: relative to cwd.
 //   - Otherwise: relative to dirfd.
-func resolveExecveatPath(pid uint32, dirfd, pathnameAddr, flags uint64) string {
+func resolveExecveatPath(pid uint32, dirfd, pathnameAddr, flags uint64) (string, error) {
 	pathname, err := readStringFromPID(pid, pathnameAddr)
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	// AT_EMPTY_PATH: exec the fd directly.
@@ -239,17 +239,17 @@ func resolveExecveatPath(pid uint32, dirfd, pathnameAddr, flags uint64) string {
 		base, err = os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, dirfd))
 	}
 	if err != nil {
-		return ""
+		return "", err
 	}
 
 	return resolveViaProcRoot(filepath.Join(base, pathname), pid)
 }
 
 // evalFdLink resolves /proc/<pid>/fd/<fd> to a canonical path.
-func evalFdLink(pid uint32, fd uint64) string {
+func evalFdLink(pid uint32, fd uint64) (string, error) {
 	target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, fd))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	return resolveViaProcRoot(target, pid)
 }
@@ -274,12 +274,16 @@ func handleExecve(
 
 	pathname, err := readStringFromPID(pid, notif.Data.Args[0])
 	if err != nil {
-		logf("WARNING: execve cannot read path pid=%d: %v (allowing)", pid, err)
-		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED execve: cannot read path pid=%d: %v", pid, err)
 		return
 	}
 
-	resolved := resolveExecPath(pathname, pid)
+	resolved, err := resolveExecPath(pathname, pid)
+	if err != nil {
+		resp.Error = -syscallErrno(err)
+		return
+	}
 	if resolved == "" {
 		resp.Error = -int32(unix.ENOENT)
 		return
@@ -316,7 +320,12 @@ func handleExecveat(
 		return
 	}
 
-	resolved := resolveExecveatPath(pid, notif.Data.Args[0], notif.Data.Args[1], notif.Data.Args[4])
+	resolved, err := resolveExecveatPath(pid, notif.Data.Args[0], notif.Data.Args[1], notif.Data.Args[4])
+	if err != nil {
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED execveat: cannot read path pid=%d: %v", pid, err)
+		return
+	}
 	if resolved == "" {
 		resp.Error = -int32(unix.ENOENT)
 		return

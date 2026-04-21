@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,15 +38,26 @@ func readStringFromPID(pid uint32, addr uint64) (string, error) {
 	buf := make([]byte, 4096)
 	n, err := f.ReadAt(buf, int64(addr))
 	if n == 0 {
-		return "", fmt.Errorf("read %s at 0x%x: %w", path, addr, err)
+		return "",
+			fmt.Errorf("read %s at 0x%x: %w", path, addr, err)
 	}
 
-	for i := range n {
-		if buf[i] == 0 {
-			return string(buf[:i]), nil
-		}
+	idx := bytes.IndexByte(buf[:n], 0)
+	if idx < 0 {
+		return "",
+			fmt.Errorf("%w: no NUL terminator in %d bytes at 0x%x",
+				unix.ENAMETOOLONG, n, addr)
 	}
-	return string(buf[:n]), nil
+	return string(buf[:idx]), nil
+}
+
+// syscallErrno extracts the syscall errno from any error.
+func syscallErrno(err error) int32 {
+	var errno unix.Errno
+	if errors.As(err, &errno) {
+		return int32(errno)
+	}
+	return int32(unix.EIO)
 }
 
 // exePath returns the executable path for a process, or "" on error.

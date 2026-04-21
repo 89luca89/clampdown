@@ -125,7 +125,7 @@ func handleProtectedPathOp(
 ) {
 	raw, err := readStringFromPID(pid, notif.Data.Args[argIdx])
 	if err != nil {
-		resp.Error = -errCode
+		resp.Error = -syscallErrno(err)
 		logf("BLOCKED %s: cannot read path pid=%d: %v", name, pid, err)
 		return
 	}
@@ -165,7 +165,7 @@ func handleMount(
 ) {
 	target, err := readStringFromPID(pid, notif.Data.Args[1])
 	if err != nil {
-		resp.Error = -int32(unix.EPERM)
+		resp.Error = -syscallErrno(err)
 		logf("BLOCKED mount: cannot read target pid=%d: %v", pid, err)
 		return
 	}
@@ -178,16 +178,22 @@ func handleMount(
 	if flags&unix.MS_BIND != 0 {
 		source, err = readStringFromPID(pid, notif.Data.Args[0])
 		if err != nil {
-			source = ""
-		} else {
-			source = resolvePath(source, pid)
+			resp.Error = -syscallErrno(err)
+			logf("BLOCKED mount: cannot read source pid=%d: %v", pid, err)
+			return
 		}
+		source = resolvePath(source, pid)
 	}
 
 	// Read filesystem type for procfs check (arg2, may be NULL for bind/remount).
 	var fstype string
 	if notif.Data.Args[2] != 0 {
-		fstype, _ = readStringFromPID(pid, notif.Data.Args[2])
+		fstype, err = readStringFromPID(pid, notif.Data.Args[2])
+		if err != nil {
+			resp.Error = -syscallErrno(err)
+			logf("BLOCKED mount: cannot read fstype pid=%d: %v", pid, err)
+			return
+		}
 	}
 
 	if !checkNotifValid(notifFD, &notif.ID) {
@@ -261,7 +267,7 @@ func handleOpenTree(notif *seccompNotif, resp *seccompNotifResp, pid uint32, wor
 
 	path, err := readStringFromPID(pid, notif.Data.Args[1])
 	if err != nil {
-		resp.Error = -int32(unix.EPERM)
+		resp.Error = -syscallErrno(err)
 		logf("BLOCKED open_tree: cannot read path pid=%d: %v", pid, err)
 		return
 	}
@@ -380,7 +386,8 @@ func handleOpenat(
 
 	pathname, err := readStringFromPID(pid, notif.Data.Args[1])
 	if err != nil {
-		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED openat: cannot read path pid=%d: %v", pid, err)
 		return
 	}
 
@@ -411,13 +418,13 @@ func checkDualPathProtected(
 ) {
 	oldpath, err := readStringFromPID(pid, notif.Data.Args[1])
 	if err != nil {
-		resp.Error = -int32(unix.EPERM)
+		resp.Error = -syscallErrno(err)
 		logf("BLOCKED %s: cannot read oldpath pid=%d: %v", syscallName, pid, err)
 		return
 	}
 	newpath, err := readStringFromPID(pid, notif.Data.Args[3])
 	if err != nil {
-		resp.Error = -int32(unix.EPERM)
+		resp.Error = -syscallErrno(err)
 		logf("BLOCKED %s: cannot read newpath pid=%d: %v", syscallName, pid, err)
 		return
 	}
