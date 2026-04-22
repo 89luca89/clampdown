@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -108,6 +109,7 @@ func agentConfig(
 	ag agent.Agent,
 	mounts []container.MountSpec, seccompPath string,
 	homeDir string, route *agent.ProxyRoute,
+	allowEntries []network.AllowEntry,
 ) container.AgentContainerConfig {
 	tmpfs := []container.TmpfsSpec{
 		{Path: "/run", Size: "256m", NoExec: true, NoSuid: true},
@@ -129,6 +131,18 @@ func agentConfig(
 	if route != nil {
 		connectPorts = append(connectPorts, route.Port)
 		keyEnv = proxyAgentEnv(ag, route)
+	}
+	
+	// we need to allow also additional port from allow entries.
+	for _, e := range allowEntries {
+		if e.Port == 0 {
+			continue
+		}
+		port := uint16(e.Port)
+		if slices.Contains(connectPorts, port) {
+			continue
+		}
+		connectPorts = append(connectPorts, port)
 	}
 
 	policyJSON := AgentLandlockPolicy(allMounts, tmpfs, connectPorts)

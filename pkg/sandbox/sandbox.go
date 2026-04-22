@@ -357,7 +357,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	agentCfg := agentConfig(
 		agentName, sidecarName, sessionID, opts,
 		ag, mnts, agentSeccomp,
-		p.Home, proxyRoute,
+		p.Home, proxyRoute, allowEntries,
 	)
 
 	slog.Info("starting agent", "name", ag.Name())
