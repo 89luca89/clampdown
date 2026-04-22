@@ -296,7 +296,7 @@ func runTests(m *testing.M) (code int) {
 		return 1
 	}
 
-	resolved := network.ResolveAllowlist(container.RegistryDomains)
+	allowEntries := network.ResolveAllowEntries(container.RegistryDomains)
 
 	uid := strconv.Itoa(os.Getuid())
 	gid := strconv.Itoa(os.Getgid())
@@ -443,7 +443,7 @@ func runTests(m *testing.M) (code int) {
 
 	// Build firewall rulesets — the entrypoint only sets deny-all baseline.
 	for _, sc := range []string{sidecarName, digestSidecar, integSidecar} {
-		err = network.BuildAgentFirewall(ctx, rt, sc, "deny", resolved)
+		err = network.BuildAgentFirewall(ctx, rt, sc, "deny", allowEntries)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "agent firewall %s: %v\n", sc, err)
 			return 1
@@ -1014,7 +1014,7 @@ func TestEgress(t *testing.T) {
 		// does not include mcr.microsoft.com (default: reject).
 		ctx := context.Background()
 		err := network.AgentAllow(ctx, rt, sidecarName, statePath,
-			[]string{"mcr.microsoft.com"}, 443)
+			[]string{"mcr.microsoft.com:443"})
 		if err != nil {
 			t.Fatalf("add agent allow: %v", err)
 		}
@@ -1046,7 +1046,7 @@ func TestEgress(t *testing.T) {
 		// example.com:80, then verify the fetch fails.
 		ctx := context.Background()
 		err := network.PodBlock(ctx, rt, sidecarName, statePath,
-			[]string{"example.com"}, 80)
+			[]string{"example.com:80"})
 		if err != nil {
 			t.Fatalf("add pod block: %v", err)
 		}

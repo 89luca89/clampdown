@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,65 +27,53 @@ var dnsServers = []string{
 	"[2620:119:35::35]:53",      // OpenDNS (IPv6)
 }
 
-// ResolveAllowlist resolves domains to IPs using multiple DNS resolvers.
-// IPs and CIDRs pass through unchanged. Used at startup to pre-resolve
-// the agent's static allowlist before passing to the sidecar as env var.
-//
-// Queries each domain against multiple public DNS servers to capture
-// geographically diverse round-robin IPs from CDNs.
-func ResolveAllowlist(domains []string) []string {
-	var out []string
+// AllowEntry pairs a resolved allowlist target with its TCP destination port.
+// Target is an IP or CIDR.
+type AllowEntry struct {
+	Target string
+	Port   int
+}
 
-	// Separate passthrough entries (IPs, CIDRs) from domains needing resolution.
-	var toResolve []string
-	for _, entry := range domains {
-		if net.ParseIP(entry) != nil {
-			out = append(out, entry)
-			continue
-		}
-		_, cidr, cidrErr := net.ParseCIDR(entry)
-		if cidrErr == nil {
-			ones, bits := cidr.Mask.Size()
-			if bits == 0 {
-				slog.Warn("non-standard CIDR mask in allowlist, skipping", "cidr", entry)
-				continue
-			}
-			if ones < 4 {
-				slog.Warn("overly broad CIDR in allowlist, skipping", "cidr", entry)
-				continue
-			}
-			out = append(out, entry)
-			continue
-		}
-		toResolve = append(toResolve, entry)
-	}
+const defaultAllowPort = 443
 
-	// Resolve all domains in parallel.
-	resolved := make([][]string, len(toResolve))
-
+// ResolveAllowEntries parses each entry as "host[:port]" and resolves hostnames
+// to IPs in parallel per entry. Literals pass through with their parsed port.
+func ResolveAllowEntries(raw []string) []AllowEntry {
+	results := make([][]AllowEntry, len(raw))
 	var wg sync.WaitGroup
-	for i, domain := range toResolve {
+	for i, r := range raw {
 		wg.Go(func() {
-			resolved[i] = resolveDomain(domain)
+			host, port, literal := splitSpec(r)
+			if host == "" {
+				return
+			}
+			if literal {
+				results[i] = []AllowEntry{{Target: host, Port: port}}
+				return
+			}
+			ips := resolveDomain(host)
+			if len(ips) == 0 {
+				slog.Warn("cannot resolve host", "host", host)
+				return
+			}
+			out := make([]AllowEntry, len(ips))
+			for j, ip := range ips {
+				out[j] = AllowEntry{Target: ip, Port: port}
+			}
+			results[i] = out
 		})
 	}
 	wg.Wait()
 
-	for i, ips := range resolved {
-		if len(ips) == 0 {
-			slog.Warn("cannot resolve host", "host", toResolve[i])
-			continue
-		}
-		out = append(out, ips...)
-		slog.Debug("resolved domain", "domain", toResolve[i], "ips", len(ips))
+	var out []AllowEntry
+	for _, es := range results {
+		out = append(out, es...)
 	}
-
-	slices.Sort(out)
-	return slices.Compact(out)
+	return out
 }
 
-// resolveDomain queries all DNS servers in parallel, each 20 times
-// sequentially to catch round-robin rotation.
+// resolveDomain queries all DNS servers in parallel, each 20 times sequentially
+// to catch round-robin rotation. Returns deduplicated IPs.
 func resolveDomain(domain string) []string {
 	perServer := make([][]string, len(dnsServers))
 
@@ -125,18 +114,26 @@ func resolveDomain(domain string) []string {
 	for _, ips := range perServer {
 		all = append(all, ips...)
 	}
-	return all
+	slices.Sort(all)
+	return slices.Compact(all)
 }
 
-// ClassifyIPs splits resolved IPs into IPv4 and IPv6 buckets.
-func ClassifyIPs(entries []string) ([]string, []string) {
-	var ip4s, ip6s []string
-	for _, entry := range entries {
-		if strings.Contains(entry, ":") {
-			ip6s = append(ip6s, entry)
-		} else {
-			ip4s = append(ip4s, entry)
+// splitSpec parses "host[:port]" into host, port, and whether host is a literal
+// IP or CIDR that bypasses DNS. Port defaults to 443 when absent or invalid;
+// port 0 signals "all ports" to rule emitters. IPv6 literals must be bracketed
+// to carry a port ("[::1]:443").
+func splitSpec(s string) (host string, port int, literal bool) {
+	host = strings.TrimSpace(s)
+	port = defaultAllowPort
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		if n, perr := strconv.Atoi(p); perr == nil && n >= 0 && n <= 65535 {
+			host, port = h, n
 		}
 	}
-	return ip4s, ip6s
+	if net.ParseIP(host) != nil {
+		literal = true
+	} else if _, _, err := net.ParseCIDR(host); err == nil {
+		literal = true
+	}
+	return host, port, literal
 }

@@ -462,14 +462,20 @@ func TestResolveExecPath_Absolute(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got := resolveExecPath(bin, uint32(os.Getpid()))
+	got, err := resolveExecPath(bin, uint32(os.Getpid()))
+	if err != nil {
+		t.Fatalf("resolveExecPath(%q) error: %v", bin, err)
+	}
 	if got != bin {
 		t.Errorf("resolveExecPath(%q) = %q, want %q", bin, got, bin)
 	}
 }
 
 func TestResolveExecPath_Empty(t *testing.T) {
-	got := resolveExecPath("", uint32(os.Getpid()))
+	got, err := resolveExecPath("", uint32(os.Getpid()))
+	if err != nil {
+		t.Fatalf("resolveExecPath(\"\") error: %v", err)
+	}
 	if got != "" {
 		t.Errorf("resolveExecPath(\"\") = %q, want \"\"", got)
 	}

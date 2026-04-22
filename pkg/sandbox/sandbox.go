@@ -312,8 +312,8 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	// Build the full firewall ruleset now that the sidecar API is up.
 	// The entrypoint set a deny-all baseline; we add the agent allowlist
 	// and pod chains before any untrusted code starts.
-	allowIPs := agentAllowIPs(ag, opts.AgentAllow)
-	err = network.BuildAgentFirewall(ctx, rt, sidecarName, opts.AgentPolicy, allowIPs)
+	allowEntries := agentAllowEntries(ag, opts.AgentAllow)
+	err = network.BuildAgentFirewall(ctx, rt, sidecarName, opts.AgentPolicy, allowEntries)
 	if err != nil {
 		rollback()
 		return "", fmt.Errorf("agent firewall: %w", err)

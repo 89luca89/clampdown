@@ -140,8 +140,9 @@
               │  │ 2. ACCEPT established  │   │
               │  │ 3. ACCEPT DNS :53      │   │
               │  │    (10/s burst 20)     │   │
-              │  │ 4. REJECT private CIDRs│   │
-              │  │ 5. ACCEPT allowlist IPs│   │
+              │  │ 4. ACCEPT allowlist    │   │
+              │  │    host:port           │   │
+              │  │ 5. REJECT private CIDRs│   │
               │  │ 6. -> AGENT_ALLOW      │   │
               │  │ 7. REJECT (default)    │   │
               │  └────────────────────────┘   │

@@ -81,9 +81,9 @@ func InitState(path string) error {
 // BuildAgentFirewall creates the full agent OUTPUT chain structure via
 // iptables-restore. Applied atomically in 2 calls (IPv4 + IPv6).
 //
-// deny mode: loopback -> established -> DNS (rate-limited) -> private CIDRs REJECT ->
+// deny mode: loopback -> established -> DNS (rate-limited) -> per-entry
 //
-//	per-IP TCP 443 ACCEPT -> AGENT_ALLOW -> terminal REJECT
+//	TCP port ACCEPT -> private CIDRs REJECT -> AGENT_ALLOW -> terminal REJECT
 //
 // allow mode: loopback -> established -> AGENT_ALLOW -> private CIDRs REJECT ->
 //
@@ -93,21 +93,29 @@ func BuildAgentFirewall(
 	rt container.Runtime,
 	sidecar string,
 	policy string,
-	allowIPs []string,
+	allow []AllowEntry,
 ) error {
-	ip4s, ip6s := ClassifyIPs(allowIPs)
+	var v4, v6 []AllowEntry
+	for _, e := range allow {
+		if strings.Contains(e.Target, ":") {
+			v6 = append(v6, e)
+		} else {
+			v4 = append(v4, e)
+		}
+	}
 
 	for _, bin := range []string{binIPT4, binIPT6} {
-		var dests, privRanges []string
+		var dests []AllowEntry
+		var privRanges []string
 		rejectType := "icmp-port-unreachable"
 		restoreBin := "/usr/sbin/iptables-restore"
 		if bin == binIPT6 {
-			dests = ip6s
+			dests = v6
 			privRanges = privateV6
 			rejectType = "icmp6-port-unreachable"
 			restoreBin = "/usr/sbin/ip6tables-restore"
 		} else {
-			dests = ip4s
+			dests = v4
 			privRanges = privateV4
 		}
 
@@ -130,11 +138,15 @@ func BuildAgentFirewall(
 					"-A OUTPUT -p udp --dport 53 -j DROP\n" +
 					"-A OUTPUT -p tcp --dport 53 -m limit --limit 10/s --limit-burst 20 -j ACCEPT\n" +
 					"-A OUTPUT -p tcp --dport 53 -j DROP\n")
+			for _, e := range dests {
+				if e.Port == 0 {
+					fmt.Fprintf(&buf, "-A OUTPUT -p tcp -d %s -j ACCEPT\n", e.Target)
+				} else {
+					fmt.Fprintf(&buf, "-A OUTPUT -p tcp --dport %d -d %s -j ACCEPT\n", e.Port, e.Target)
+				}
+			}
 			for _, cidr := range privRanges {
 				fmt.Fprintf(&buf, "-A OUTPUT ! -o lo -d %s -j REJECT --reject-with %s\n", cidr, rejectType)
-			}
-			for _, dest := range dests {
-				fmt.Fprintf(&buf, "-A OUTPUT -p tcp --dport 443 -d %s -j ACCEPT\n", dest)
 			}
 			fmt.Fprintf(&buf, "-A OUTPUT -j %s\n"+
 				"-A OUTPUT -j REJECT --reject-with %s\n",
@@ -156,10 +168,14 @@ func BuildAgentFirewall(
 		}
 	}
 
+	parts := make([]string, 0, len(allow))
+	for _, e := range allow {
+		parts = append(parts, fmt.Sprintf("%s:%d", e.Target, e.Port))
+	}
 	_ = rt.Log(ctx, sidecar, "firewall",
 		fmt.Sprintf("BUILD agent: policy=%s allow=%s",
-			policy, strings.Join(allowIPs, ",")))
-	slog.Info("agent firewall built", "policy", policy, "ipv4", len(ip4s), "ipv6", len(ip6s))
+			policy, strings.Join(parts, ",")))
+	slog.Info("agent firewall built", "policy", policy, "ipv4", len(v4), "ipv6", len(v6))
 	return nil
 }
 
@@ -230,40 +246,28 @@ func BuildPodFirewall(ctx context.Context, rt container.Runtime, sidecar string,
 	return nil
 }
 
-// AgentAllow sets a host to ACCEPT in the agent firewall.
-// Port defaults to 443 if empty.
-func AgentAllow(
-	ctx context.Context,
-	rt container.Runtime,
-	sidecar, statePath string,
-	targets []string,
-	port int,
-) error {
-	return modifyState(ctx, rt, sidecar, statePath, "agent", "ACCEPT", targets, port)
+// AgentAllow sets hosts to ACCEPT in the agent firewall. Each target is
+// "host[:port]"; port defaults to 443, and port 0 means all ports.
+func AgentAllow(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string) error {
+	return modifyState(ctx, rt, sidecar, statePath, "agent", "ACCEPT", targets)
 }
 
-// AgentBlock sets a host to REJECT in the agent firewall.
-// Port 0 means all ports.
-func AgentBlock(
-	ctx context.Context,
-	rt container.Runtime,
-	sidecar, statePath string,
-	targets []string,
-	port int,
-) error {
-	return modifyState(ctx, rt, sidecar, statePath, "agent", "REJECT", targets, port)
+// AgentBlock sets hosts to REJECT in the agent firewall. Target syntax matches
+// AgentAllow; use "host:0" to block all ports.
+func AgentBlock(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string) error {
+	return modifyState(ctx, rt, sidecar, statePath, "agent", "REJECT", targets)
 }
 
-// PodAllow sets a host to ACCEPT in the pod firewall.
-// Port defaults to 443 if empty.
-func PodAllow(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string, port int) error {
-	return modifyState(ctx, rt, sidecar, statePath, "pod", "ACCEPT", targets, port)
+// PodAllow sets hosts to ACCEPT in the pod firewall. Target syntax matches
+// AgentAllow.
+func PodAllow(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string) error {
+	return modifyState(ctx, rt, sidecar, statePath, "pod", "ACCEPT", targets)
 }
 
-// PodBlock sets a host to DROP in the pod firewall.
-// Port 0 means all ports.
-func PodBlock(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string, port int) error {
-	return modifyState(ctx, rt, sidecar, statePath, "pod", "DROP", targets, port)
+// PodBlock sets hosts to DROP in the pod firewall. Target syntax matches
+// AgentAllow; use "host:0" to block all ports.
+func PodBlock(ctx context.Context, rt container.Runtime, sidecar, statePath string, targets []string) error {
+	return modifyState(ctx, rt, sidecar, statePath, "pod", "DROP", targets)
 }
 
 // ListRules prints dynamic rules from the state file.
@@ -351,10 +355,11 @@ func PodReset(ctx context.Context, rt container.Runtime, sidecar, statePath stri
 	return nil
 }
 
-// modifyState updates the state file and reconciles iptables.
+// modifyState updates the state file and reconciles iptables. Each target is
+// "host[:port]" (default 443, 0 means all ports).
 func modifyState(
 	ctx context.Context, rt container.Runtime, sidecar, statePath string,
-	scope, action string, targets []string, port int,
+	scope, action string, targets []string,
 ) error {
 	state, err := LoadState(statePath)
 	if err != nil {
@@ -362,14 +367,20 @@ func modifyState(
 	}
 
 	for _, target := range targets {
-		resolved := ResolveAllowlist([]string{target})
-		if len(resolved) == 0 {
-			return fmt.Errorf("no IPs resolved for %s", target)
+		host, port, literal := splitSpec(target)
+		var ips []string
+		if literal {
+			ips = []string{host}
+		} else {
+			ips = resolveDomain(host)
+		}
+		if len(ips) == 0 {
+			return fmt.Errorf("no IPs resolved for %s", host)
 		}
 
 		entry := FirewallEntry{
-			Host:   target,
-			IPs:    resolved,
+			Host:   host,
+			IPs:    ips,
 			Port:   port,
 			Action: action,
 		}
@@ -377,7 +388,7 @@ func modifyState(
 		entries := scopeEntries(state, scope)
 		found := false
 		for i, e := range *entries {
-			if e.Host == target {
+			if e.Host == host && e.Port == port {
 				(*entries)[i] = entry
 				found = true
 				break
@@ -398,11 +409,11 @@ func modifyState(
 	}
 
 	_ = rt.Log(ctx, sidecar, "firewall",
-		fmt.Sprintf("%s: scope=%s targets=%s port=%s",
-			action, scope, strings.Join(targets, ","), portStr(port)))
+		fmt.Sprintf("%s: scope=%s targets=%s",
+			action, scope, strings.Join(targets, ",")))
 	slog.Info("applied firewall rules",
 		"action", action, "scope", scope,
-		"targets", strings.Join(targets, ", "), "port", portStr(port))
+		"targets", strings.Join(targets, ", "))
 	return nil
 }
 
@@ -453,12 +464,6 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 			table, allowChain, blockChain, allowChain, blockChain)
 
 		for _, e := range entries {
-			ip4s, ip6s := ClassifyIPs(e.IPs)
-			ips := ip4s
-			if isV6 {
-				ips = ip6s
-			}
-
 			chain := allowChain
 			if e.Action != "ACCEPT" {
 				chain = blockChain
@@ -473,7 +478,10 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 				rejectSuffix = " --reject-with " + rejectType
 			}
 
-			for _, ip := range ips {
+			for _, ip := range e.IPs {
+				if strings.Contains(ip, ":") != isV6 {
+					continue
+				}
 				portRule := ""
 				if e.Port > 0 {
 					portRule = fmt.Sprintf(" -p tcp --dport %d", e.Port)

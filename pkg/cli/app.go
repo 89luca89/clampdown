@@ -107,7 +107,7 @@ func Run(args []string) error {
 				Name:    "agent-allow",
 				Value:   cfg.AgentAllow,
 				Sources: ucli.EnvVars("SANDBOX_AGENT_ALLOW"),
-				Usage:   "Additional domains for agent allowlist (comma-separated)",
+				Usage:   "Additional host[:port] entries for agent allowlist (comma-separated, default port 443). Startup entries sit before the private-CIDR reject so explicit private targets are reachable.",
 			},
 			&ucli.StringFlag{
 				Name:    "pod-policy",
@@ -219,16 +219,16 @@ func Run(args []string) error {
 						Commands: []*ucli.Command{
 							{
 								Name:      "allow",
-								Usage:     "Allow agent traffic to a host/CIDR on specific ports",
-								ArgsUsage: "<target> [target...]",
-								Flags:     []ucli.Flag{sessionFlag(), portFlag()},
+								Usage:     "Allow agent traffic to host[:port] (default port 443, :0 means all ports)",
+								ArgsUsage: "<host[:port]> [host[:port]...]",
+								Flags:     []ucli.Flag{sessionFlag()},
 								Action:    networkAgentAllow,
 							},
 							{
 								Name:      "block",
-								Usage:     "Block agent traffic to a host/CIDR on specific ports",
-								ArgsUsage: "<target> [target...]",
-								Flags:     []ucli.Flag{sessionFlag(), portFlag()},
+								Usage:     "Block agent traffic to host[:port] (default port 443, :0 means all ports)",
+								ArgsUsage: "<host[:port]> [host[:port]...]",
+								Flags:     []ucli.Flag{sessionFlag()},
 								Action:    networkAgentBlock,
 							},
 							{
@@ -245,16 +245,16 @@ func Run(args []string) error {
 						Commands: []*ucli.Command{
 							{
 								Name:      "allow",
-								Usage:     "Allow pod traffic to a host/CIDR on specific ports",
-								ArgsUsage: "<target> [target...]",
-								Flags:     []ucli.Flag{sessionFlag(), portFlag()},
+								Usage:     "Allow pod traffic to host[:port] (default port 443, :0 means all ports)",
+								ArgsUsage: "<host[:port]> [host[:port]...]",
+								Flags:     []ucli.Flag{sessionFlag()},
 								Action:    networkPodAllow,
 							},
 							{
 								Name:      "block",
-								Usage:     "Block pod traffic to a host/CIDR on specific ports",
-								ArgsUsage: "<target> [target...]",
-								Flags:     []ucli.Flag{sessionFlag(), portFlag()},
+								Usage:     "Block pod traffic to host[:port] (default port 443, :0 means all ports)",
+								ArgsUsage: "<host[:port]> [host[:port]...]",
+								Flags:     []ucli.Flag{sessionFlag()},
 								Action:    networkPodBlock,
 							},
 							{
@@ -303,13 +303,6 @@ func sessionFlag() *ucli.StringFlag {
 		Aliases:  []string{"s"},
 		Usage:    "Session ID (use 'list' to find running sessions)",
 		Required: true,
-	}
-}
-
-func portFlag() *ucli.IntFlag {
-	return &ucli.IntFlag{
-		Name:  "port",
-		Usage: "Port to allow/block (default: 443 for allow, all ports for block)",
 	}
 }
 
@@ -543,17 +536,13 @@ func networkAgentAllow(ctx context.Context, cmd *ucli.Command) error {
 	}
 	targets := cmd.Args().Slice()
 	if len(targets) == 0 {
-		return errors.New("at least one host/IP/CIDR required")
+		return errors.New("at least one host[:port] target required")
 	}
 	statePath, err := findStatePath(ctx, rt, sidecar)
 	if err != nil {
 		return err
 	}
-	port := cmd.Int("port")
-	if port == 0 {
-		port = 443
-	}
-	return network.AgentAllow(ctx, rt, sidecar, statePath, targets, port)
+	return network.AgentAllow(ctx, rt, sidecar, statePath, targets)
 }
 
 func networkAgentBlock(ctx context.Context, cmd *ucli.Command) error {
@@ -563,13 +552,13 @@ func networkAgentBlock(ctx context.Context, cmd *ucli.Command) error {
 	}
 	targets := cmd.Args().Slice()
 	if len(targets) == 0 {
-		return errors.New("at least one host/IP/CIDR required")
+		return errors.New("at least one host[:port] target required")
 	}
 	statePath, err := findStatePath(ctx, rt, sidecar)
 	if err != nil {
 		return err
 	}
-	return network.AgentBlock(ctx, rt, sidecar, statePath, targets, cmd.Int("port"))
+	return network.AgentBlock(ctx, rt, sidecar, statePath, targets)
 }
 
 func networkPodAllow(ctx context.Context, cmd *ucli.Command) error {
@@ -579,17 +568,13 @@ func networkPodAllow(ctx context.Context, cmd *ucli.Command) error {
 	}
 	targets := cmd.Args().Slice()
 	if len(targets) == 0 {
-		return errors.New("at least one host/IP/CIDR required")
+		return errors.New("at least one host[:port] target required")
 	}
 	statePath, err := findStatePath(ctx, rt, sidecar)
 	if err != nil {
 		return err
 	}
-	port := cmd.Int("port")
-	if port == 0 {
-		port = 443
-	}
-	return network.PodAllow(ctx, rt, sidecar, statePath, targets, port)
+	return network.PodAllow(ctx, rt, sidecar, statePath, targets)
 }
 
 func networkPodBlock(ctx context.Context, cmd *ucli.Command) error {
@@ -599,13 +584,13 @@ func networkPodBlock(ctx context.Context, cmd *ucli.Command) error {
 	}
 	targets := cmd.Args().Slice()
 	if len(targets) == 0 {
-		return errors.New("at least one host/IP/CIDR required")
+		return errors.New("at least one host[:port] target required")
 	}
 	statePath, err := findStatePath(ctx, rt, sidecar)
 	if err != nil {
 		return err
 	}
-	return network.PodBlock(ctx, rt, sidecar, statePath, targets, cmd.Int("port"))
+	return network.PodBlock(ctx, rt, sidecar, statePath, targets)
 }
 
 func networkAgentReset(ctx context.Context, cmd *ucli.Command) error {

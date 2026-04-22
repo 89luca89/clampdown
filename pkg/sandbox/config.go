@@ -204,19 +204,19 @@ func AgentLandlockPolicy(
 	return string(data)
 }
 
-func agentAllowIPs(ag agent.Agent, extra string) []string {
-	var domains []string
-	domains = append(domains, container.RegistryDomains...)
-	domains = append(domains, ag.EgressDomains()...)
+func agentAllowEntries(ag agent.Agent, extra string) []network.AllowEntry {
+	var specs []string
+	specs = append(specs, container.RegistryDomains...)
+	specs = append(specs, ag.EgressDomains()...)
 	if extra != "" {
 		for d := range strings.SplitSeq(extra, ",") {
 			d = strings.TrimSpace(d)
 			if d != "" {
-				domains = append(domains, d)
+				specs = append(specs, d)
 			}
 		}
 	}
-	return network.ResolveAllowlist(domains)
+	return network.ResolveAllowEntries(specs)
 }
 
 // findAuthFile returns the first existing registry auth file on the host.

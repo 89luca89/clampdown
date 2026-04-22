@@ -336,7 +336,7 @@ clampdown [options] <agent> [-- agent-flags...]
 | Flag | Default | Env | Description |
 |------|---------|-----|-------------|
 | `--agent-policy` | `deny` | `SANDBOX_AGENT_POLICY` | Agent egress default: `deny` (allowlist only) or `allow` |
-| `--agent-allow` | -- | `SANDBOX_AGENT_ALLOW` | Extra domains for the agent allowlist (comma-separated) |
+| `--agent-allow` | -- | `SANDBOX_AGENT_ALLOW` | Extra `host[:port]` entries for the agent allowlist (comma-separated, default port 443) |
 | `--pod-policy` | `allow` | `SANDBOX_POD_POLICY` | Tool container egress default: `allow` or `deny` |
 
 The agent's egress allowlist includes the domains required by the agent (API endpoints,
@@ -497,23 +497,27 @@ Network rules can be adjusted while a session is running:
 
 ```sh
 # Allow the agent to reach a host on a specific port
-clampdown network agent allow -s <session-id> example.com --port 443
+clampdown network agent allow -s <session-id> example.com:443
 
-# Block a host
-clampdown network agent block -s <session-id> example.com --port 443
+# Block a host on a specific port
+clampdown network agent block -s <session-id> example.com:443
+
+# Block a host on every port
+clampdown network agent block -s <session-id> example.com:0
 
 # Remove all dynamic agent rules (returns to startup state)
 clampdown network agent reset -s <session-id>
 
 # Same commands for tool containers (pod)
-clampdown network pod allow -s <session-id> db.internal --port 5432
+clampdown network pod allow -s <session-id> db.internal:5432
 clampdown network pod reset -s <session-id>
 
 # Show current rules for a session
 clampdown network list -s <session-id>
 ```
 
-Targets can be hostnames, IP addresses, or CIDRs. Hostnames are resolved to IPs at the
+Targets are `host[:port]` with port defaulting to 443 and `:0` meaning all ports.
+Host can be a hostname, IP address, or CIDR. Hostnames are resolved to IPs at the
 time the rule is applied.
 
 ---

@@ -58,9 +58,14 @@ the `createRuntime` security-policy checks (18 checks), and sensitive path maski
 This is a limitation of the OCI hook specification — `precreate` is a podman extension not implemented in buildah.
 
 **Egress filtering is IP-based, not domain-based.**
-The agent firewall resolves the domain allowlist to IP addresses at session startup and installs iptables rules for those IPs.
+The agent firewall resolves the `host[:port]` allowlist to IP addresses at session startup and installs iptables rules for those IPs.
 A sufficiently motivated agent could exfiltrate data via DNS queries (rate-limited to 10/s) or by using allowlisted IP addresses
 after connecting through them. A DNS-intercepting proxy would close this gap but is not currently implemented.
+
+**Private-CIDR traversal is opt-in per startup entry.**
+Startup `--agent-allow` entries are installed before the private-CIDR REJECT, so a listed private host:port is reachable. The rule is
+per-IP per-port, not a blanket private bypass. Dynamic rules added via `clampdown network agent allow` sit after the REJECT and cannot
+reach private targets.
 
 **No kernel isolation boundary (containers share the VM/host kernel).**
 Clampdown uses containers, not hypervisor VMs. On native Linux, the agent
