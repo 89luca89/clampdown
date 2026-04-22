@@ -79,7 +79,7 @@ func baseConfig() Config {
 	c.Linux.MaskedPaths = append([]string{}, requiredMaskedPaths...)
 	c.Linux.ReadonlyPaths = append([]string{}, requiredReadonlyPaths...)
 	c.Linux.RootfsPropagation = "private"
-	c.Process.User.AdditionalGids = []uint32{0, 1, 2, 3, 4, 6, 10, 11, 20, 26, 27}
+	c.Process.User.AdditionalGids = []uint32{1, 2, 3, 4, 6, 11, 20, 26}
 	c.Mounts = append(c.Mounts, struct {
 		Source      string   `json:"source"`
 		Destination string   `json:"destination"`
@@ -959,7 +959,7 @@ func TestCheckProcMount_NoProcMount(t *testing.T) {
 	}
 }
 
-func TestCheckAdditionalGids_AllowedSet(t *testing.T) {
+func TestCheckAdditionalGids_NonPrivilegedGroups(t *testing.T) {
 	c := baseConfig()
 	err := checkAdditionalGids(c)
 	if err != nil {
@@ -976,12 +976,23 @@ func TestCheckAdditionalGids_Empty(t *testing.T) {
 	}
 }
 
-func TestCheckAdditionalGids_UnexpectedGroup(t *testing.T) {
+func TestCheckAdditionalGids_DeniedGroup(t *testing.T) {
+	for _, gid := range []uint32{0, 10, 27} {
+		c := baseConfig()
+		c.Process.User.AdditionalGids = append(c.Process.User.AdditionalGids, gid)
+		err := checkAdditionalGids(c)
+		if err == nil {
+			t.Errorf("expected error for denied supplementary group %d", gid)
+		}
+	}
+}
+
+func TestCheckAdditionalGids_ArbitraryGroupOK(t *testing.T) {
 	c := baseConfig()
 	c.Process.User.AdditionalGids = append(c.Process.User.AdditionalGids, 999)
 	err := checkAdditionalGids(c)
-	if err == nil {
-		t.Fatal("expected error for unexpected supplementary group 999")
+	if err != nil {
+		t.Errorf("expected pass for non-privileged GID 999, got: %v", err)
 	}
 }
 

@@ -55,6 +55,13 @@ var credentialSpecs = []struct {
 	{"/run/credentials/ssh-agent.sock", "/run/ssh-agent.sock", "SSH_AUTH_SOCK", "/run/ssh-agent.sock"},
 }
 
+// deniedGids are supplementary groups that grant privileged access.
+var deniedGids = map[uint32]string{
+	0:  "root",
+	10: "wheel",
+	27: "sudo",
+}
+
 var infraMountPrefixes = []string{
 	"/var/lib/containers/storage",
 	"/var/run/containers/storage",
@@ -110,6 +117,20 @@ func isInfraMount(m mount) bool {
 
 func hasOption(opts []string, name string) bool {
 	return slices.Contains(opts, name)
+}
+
+// filterAdditionalGids removes privileged supplementary groups.
+func filterAdditionalGids(gids []uint32) []uint32 {
+	filtered := make([]uint32, 0, len(gids))
+	for _, g := range gids {
+		name, denied := deniedGids[g]
+		if denied {
+			logf("WARN: filtering supplementary group %d (%s) from additionalGids", g, name)
+			continue
+		}
+		filtered = append(filtered, g)
+	}
+	return filtered
 }
 
 func derivePolicy(mounts []mount) landlockPolicy {
@@ -215,7 +236,11 @@ func main() {
 	uidStr := strings.TrimSpace(string(uidBytes))
 	var user map[string]json.RawMessage
 	if process["user"] != nil {
-		_ = json.Unmarshal(process["user"], &user)
+		err = json.Unmarshal(process["user"], &user)
+		if err != nil {
+			logf("seal-inject: parse process.user: %v", err)
+			os.Exit(1)
+		}
 	}
 	if user == nil {
 		user = make(map[string]json.RawMessage)
@@ -237,6 +262,16 @@ func main() {
 		os.Exit(1)
 	}
 	user["gid"], _ = json.Marshal(gid)
+
+	if user["additionalGids"] != nil {
+		var additionalGids []uint32
+		err = json.Unmarshal(user["additionalGids"], &additionalGids)
+		if err != nil {
+			logf("seal-inject: parse additionalGids: %v", err)
+			os.Exit(1)
+		}
+		user["additionalGids"], _ = json.Marshal(filterAdditionalGids(additionalGids))
+	}
 	process["user"], _ = json.Marshal(user)
 
 	// Prepend seal to process.args.

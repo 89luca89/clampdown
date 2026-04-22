@@ -2,7 +2,10 @@
 
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestIsSubPath(t *testing.T) {
 	tests := []struct {
@@ -161,5 +164,35 @@ func TestIsInfraMount_NonAbsoluteSource(t *testing.T) {
 	// derivePolicy handles type mounts separately).
 	if isInfraMount(m) {
 		t.Error("proc mount should NOT be infra")
+	}
+}
+
+func TestFilterAdditionalGids_Passthrough(t *testing.T) {
+	got := filterAdditionalGids([]uint32{1, 2, 100, 1000})
+	want := []uint32{1, 2, 100, 1000}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFilterAdditionalGids_StripsPrivileged(t *testing.T) {
+	got := filterAdditionalGids([]uint32{0, 1, 10, 27, 1000})
+	want := []uint32{1, 1000}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFilterAdditionalGids_Empty(t *testing.T) {
+	got := filterAdditionalGids(nil)
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty slice", got)
+	}
+}
+
+func TestFilterAdditionalGids_AllPrivileged(t *testing.T) {
+	got := filterAdditionalGids([]uint32{0, 10, 27})
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty slice", got)
 	}
 }
