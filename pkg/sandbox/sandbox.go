@@ -249,6 +249,8 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 
 	// rollback removes partially created containers on startup failure.
 	rollback := func() {
+		//nolint:govet // redeclare to avoid override of the outer scope
+		var err error
 		names := []string{agentName}
 		if proxyName != "" {
 			names = append(names, proxyName)
