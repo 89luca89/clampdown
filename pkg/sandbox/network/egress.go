@@ -65,9 +65,16 @@ func ResolveAllowEntries(raw []string) []AllowEntry {
 	}
 	wg.Wait()
 
+	seen := make(map[AllowEntry]struct{})
 	var out []AllowEntry
 	for _, es := range results {
-		out = append(out, es...)
+		for _, e := range es {
+			if _, ok := seen[e]; ok {
+				continue
+			}
+			seen[e] = struct{}{}
+			out = append(out, e)
+		}
 	}
 	return out
 }

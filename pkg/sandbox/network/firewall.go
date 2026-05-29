@@ -22,6 +22,10 @@ const (
 
 	binIPT4 = "/usr/sbin/iptables"
 	binIPT6 = "/usr/sbin/ip6tables"
+
+	// maxRulesPerChunk caps the number of -A rules per iptables-restore call.
+	// Avoid kernel's netlink batch return EMSGSIZE.
+	maxRulesPerChunk = 150
 )
 
 var privateV4 = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"}
@@ -79,7 +83,7 @@ func InitState(path string) error {
 }
 
 // BuildAgentFirewall creates the full agent OUTPUT chain structure via
-// iptables-restore. Applied atomically in 2 calls (IPv4 + IPv6).
+// iptables-restore.
 //
 // deny mode: loopback -> established -> DNS (rate-limited) -> per-entry
 //
@@ -119,52 +123,11 @@ func BuildAgentFirewall(
 			privRanges = privateV4
 		}
 
-		var buf strings.Builder
-		fmt.Fprintf(&buf, "*filter\n"+
-			":%s - [0:0]\n"+
-			":%s - [0:0]\n"+
-			":OUTPUT ACCEPT [0:0]\n"+
-			"-F OUTPUT\n"+
-			"-A OUTPUT -o lo -j ACCEPT\n"+
-			"-A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT\n",
-			chainAgentAllow, chainAgentBlock)
-
-		if policy == "deny" {
-			// DNS before private CIDRs: resolver may be on a private IP
-			// (10.0.2.3 slirp4netns, 192.168.x.x bridge). Rate-limited
-			// to throttle tunneling; excess dropped.
-			buf.WriteString(
-				"-A OUTPUT -p udp --dport 53 -m limit --limit 10/s --limit-burst 20 -j ACCEPT\n" +
-					"-A OUTPUT -p udp --dport 53 -j DROP\n" +
-					"-A OUTPUT -p tcp --dport 53 -m limit --limit 10/s --limit-burst 20 -j ACCEPT\n" +
-					"-A OUTPUT -p tcp --dport 53 -j DROP\n")
-			for _, e := range dests {
-				if e.Port == 0 {
-					fmt.Fprintf(&buf, "-A OUTPUT -p tcp -d %s -j ACCEPT\n", e.Target)
-				} else {
-					fmt.Fprintf(&buf, "-A OUTPUT -p tcp --dport %d -d %s -j ACCEPT\n", e.Port, e.Target)
-				}
+		for _, chunk := range agentRestoreChunks(policy, dests, privRanges, rejectType) {
+			out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(chunk))
+			if err != nil {
+				return fmt.Errorf("%s restore: %w: %s", restoreBin, err, out)
 			}
-			for _, cidr := range privRanges {
-				fmt.Fprintf(&buf, "-A OUTPUT ! -o lo -d %s -j REJECT --reject-with %s\n", cidr, rejectType)
-			}
-			fmt.Fprintf(&buf, "-A OUTPUT -j %s\n"+
-				"-A OUTPUT -j REJECT --reject-with %s\n",
-				chainAgentAllow, rejectType)
-		} else {
-			fmt.Fprintf(&buf, "-A OUTPUT -j %s\n", chainAgentAllow)
-			for _, cidr := range privRanges {
-				fmt.Fprintf(&buf, "-A OUTPUT ! -o lo -d %s -j REJECT --reject-with %s\n", cidr, rejectType)
-			}
-			fmt.Fprintf(&buf, "-A OUTPUT -j %s\n"+
-				"-A OUTPUT -j ACCEPT\n",
-				chainAgentBlock)
-		}
-		buf.WriteString("COMMIT\n")
-
-		out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(buf.String()))
-		if err != nil {
-			return fmt.Errorf("%s restore: %w: %s", restoreBin, err, out)
 		}
 	}
 
@@ -177,6 +140,86 @@ func BuildAgentFirewall(
 			policy, strings.Join(parts, ",")))
 	slog.Info("agent firewall built", "policy", policy, "ipv4", len(v4), "ipv6", len(v6))
 	return nil
+}
+
+func agentRestoreChunks(policy string, dests []AllowEntry, privRanges []string, rejectType string) []string {
+	header := fmt.Sprintf("*filter\n"+
+		":%s - [0:0]\n"+
+		":%s - [0:0]\n"+
+		":OUTPUT ACCEPT [0:0]\n",
+		chainAgentAllow, chainAgentBlock)
+
+	writeEntry := func(buf *strings.Builder, e AllowEntry) {
+		if e.Port == 0 {
+			fmt.Fprintf(buf, "-A OUTPUT -p tcp -d %s -j ACCEPT\n", e.Target)
+		} else {
+			fmt.Fprintf(buf, "-A OUTPUT -p tcp --dport %d -d %s -j ACCEPT\n", e.Port, e.Target)
+		}
+	}
+
+	if policy != "deny" {
+		var buf strings.Builder
+		buf.WriteString(header)
+		buf.WriteString("-F OUTPUT\n" +
+			"-A OUTPUT -o lo -j ACCEPT\n" +
+			"-A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT\n")
+		fmt.Fprintf(&buf, "-A OUTPUT -j %s\n", chainAgentAllow)
+		for _, cidr := range privRanges {
+			fmt.Fprintf(&buf, "-A OUTPUT ! -o lo -d %s -j REJECT --reject-with %s\n", cidr, rejectType)
+		}
+		fmt.Fprintf(&buf, "-A OUTPUT -j %s\n"+
+			"-A OUTPUT -j ACCEPT\n",
+			chainAgentBlock)
+		buf.WriteString("COMMIT\n")
+		return []string{buf.String()}
+	}
+
+	// DNS before private CIDRs: resolver may be on a private IP
+	// (10.0.2.3 slirp4netns, 192.168.x.x bridge). Rate-limited
+	// to throttle tunneling; excess dropped.
+	prefix := "-F OUTPUT\n" +
+		"-A OUTPUT -o lo -j ACCEPT\n" +
+		"-A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT\n" +
+		"-A OUTPUT -p udp --dport 53 -m limit --limit 10/s --limit-burst 20 -j ACCEPT\n" +
+		"-A OUTPUT -p udp --dport 53 -j DROP\n" +
+		"-A OUTPUT -p tcp --dport 53 -m limit --limit 10/s --limit-burst 20 -j ACCEPT\n" +
+		"-A OUTPUT -p tcp --dport 53 -j DROP\n"
+
+	writeSuffix := func(buf *strings.Builder) {
+		for _, cidr := range privRanges {
+			fmt.Fprintf(buf, "-A OUTPUT ! -o lo -d %s -j REJECT --reject-with %s\n", cidr, rejectType)
+		}
+		fmt.Fprintf(buf, "-A OUTPUT -j %s\n"+
+			"-A OUTPUT -j REJECT --reject-with %s\n",
+			chainAgentAllow, rejectType)
+	}
+
+	chunkCount := (len(dests) + maxRulesPerChunk - 1) / maxRulesPerChunk
+	if chunkCount == 0 {
+		chunkCount = 1
+	}
+	streams := make([]string, 0, chunkCount)
+	for ci := 0; ci < chunkCount; ci++ {
+		var buf strings.Builder
+		buf.WriteString(header)
+		if ci == 0 {
+			buf.WriteString(prefix)
+		}
+		start := ci * maxRulesPerChunk
+		end := start + maxRulesPerChunk
+		if end > len(dests) {
+			end = len(dests)
+		}
+		for _, e := range dests[start:end] {
+			writeEntry(&buf, e)
+		}
+		if ci == chunkCount-1 {
+			writeSuffix(&buf)
+		}
+		buf.WriteString("COMMIT\n")
+		streams = append(streams, buf.String())
+	}
+	return streams
 }
 
 // BuildPodFirewall creates the full pod FORWARD chain structure via
@@ -431,8 +474,10 @@ func portStr(port int) string {
 	return strconv.Itoa(port)
 }
 
-// reconcile flushes the dynamic chains for a scope and rebuilds them
-// from the state file using iptables-restore for atomicity.
+// reconcile flushes the dynamic chains for a scope and rebuilds them from the
+// state file. Rules are submitted to iptables-restore in chunks of at most
+// maxRulesPerChunk to stay below the netlink batch send buffer ceiling; the
+// first chunk per protocol carries the flushes. Atomicity is per-chunk.
 func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state *FirewallState, scope string) error {
 	var table, allowChain, blockChain string
 	var entries []FirewallEntry
@@ -455,14 +500,7 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 			restoreBin = "/usr/sbin/ip6tables-restore"
 		}
 
-		var buf strings.Builder
-		fmt.Fprintf(&buf, "*%s\n"+
-			":%s - [0:0]\n"+
-			":%s - [0:0]\n"+
-			"-F %s\n"+
-			"-F %s\n",
-			table, allowChain, blockChain, allowChain, blockChain)
-
+		var lines []string
 		for _, e := range entries {
 			chain := allowChain
 			if e.Action != "ACCEPT" {
@@ -486,15 +524,40 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 				if e.Port > 0 {
 					portRule = fmt.Sprintf(" -p tcp --dport %d", e.Port)
 				}
-				fmt.Fprintf(&buf, "-A %s -d %s%s -j %s%s\n", chain, ip, portRule, e.Action, rejectSuffix)
+				lines = append(lines, fmt.Sprintf("-A %s -d %s%s -j %s%s\n", chain, ip, portRule, e.Action, rejectSuffix))
 			}
 		}
 
-		buf.WriteString("COMMIT\n")
+		header := fmt.Sprintf("*%s\n"+
+			":%s - [0:0]\n"+
+			":%s - [0:0]\n",
+			table, allowChain, blockChain)
+		flush := fmt.Sprintf("-F %s\n-F %s\n", allowChain, blockChain)
 
-		out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(buf.String()))
-		if err != nil {
-			return fmt.Errorf("reconcile %s: %w: %s", scope, err, out)
+		chunkCount := (len(lines) + maxRulesPerChunk - 1) / maxRulesPerChunk
+		if chunkCount == 0 {
+			chunkCount = 1
+		}
+		for ci := 0; ci < chunkCount; ci++ {
+			var buf strings.Builder
+			buf.WriteString(header)
+			if ci == 0 {
+				buf.WriteString(flush)
+			}
+			start := ci * maxRulesPerChunk
+			end := start + maxRulesPerChunk
+			if end > len(lines) {
+				end = len(lines)
+			}
+			for _, line := range lines[start:end] {
+				buf.WriteString(line)
+			}
+			buf.WriteString("COMMIT\n")
+
+			out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(buf.String()))
+			if err != nil {
+				return fmt.Errorf("reconcile %s: %w: %s", scope, err, out)
+			}
 		}
 	}
 
