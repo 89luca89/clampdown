@@ -56,6 +56,7 @@ var RegistryDomains = []string{
 	"auth.docker.io",
 	"docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
 	"production.cloudflare.docker.com",
+	"production.cloudfront.docker.com",
 	"registry-1.docker.io",
 	// Quay.io
 	"cdn.quay.io",
