@@ -544,6 +544,43 @@ func TestAllowedFsTypes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// procSensitive coverage
+// ---------------------------------------------------------------------------
+
+func TestProcSensitive_HostKernelControlFiles(t *testing.T) {
+	// Each path must appear in procSensitive so handleOpenat blocks
+	// writes to it from any context. CVE-2025-52881 is the canonical
+	// reproducer for this class of bug.
+	hostKernel := []string{
+		"/proc/sysrq-trigger",
+		"/proc/sys/kernel/core_pattern",
+		"/proc/sys/kernel/core_uses_pid",
+		"/proc/sys/kernel/hotplug",
+		"/proc/sys/kernel/modprobe",
+		"/proc/sys/kernel/sysrq",
+		"/proc/sys/kernel/unprivileged_userns_clone",
+		"/proc/sys/fs/binfmt_misc/register",
+		"/proc/sys/vm/drop_caches",
+		"/proc/sys/vm/panic_on_oom",
+		"/proc/sys/net/core/bpf_jit_enable",
+		"/proc/sys/net/core/bpf_jit_harden",
+		"/proc/sys/net/core/bpf_jit_kallsyms",
+	}
+	for _, path := range hostKernel {
+		found := false
+		for _, p := range procSensitive {
+			if p == path {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("procSensitive missing host-kernel control file: %q", path)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Bind mount source allowlist tests
 // ---------------------------------------------------------------------------
 

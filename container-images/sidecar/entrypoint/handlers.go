@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -88,10 +89,12 @@ var allowedFsTypes = map[string]bool{
 	"tmpfs":   true,
 }
 
-// proc1Sensitive lists /proc/1 sub-paths that must never be opened from
-// sidecar processes. Defense-in-depth behind the /dev/null mask on
-// /proc/1/mem and the mount supervisor blocking unmounts.
-var proc1Sensitive = []string{
+// procSuperMagic is the f_type returned by statfs(2) for procfs.
+const procSuperMagic = 0x9fa0
+
+// procSensitive lists procfs paths the supervisor blocks at openat.
+var procSensitive = []string{
+	// /proc/1/* (sidecar PID NS, any access)
 	"/proc/1/auxv",
 	"/proc/1/cwd",
 	"/proc/1/environ",
@@ -103,6 +106,20 @@ var proc1Sensitive = []string{
 	"/proc/1/root",
 	"/proc/1/stack",
 	"/proc/1/syscall",
+	// Host-affecting kernel control files (any context, write only)
+	"/proc/sysrq-trigger",
+	"/proc/sys/kernel/core_pattern",
+	"/proc/sys/kernel/core_uses_pid",
+	"/proc/sys/kernel/hotplug",
+	"/proc/sys/kernel/modprobe",
+	"/proc/sys/kernel/sysrq",
+	"/proc/sys/kernel/unprivileged_userns_clone",
+	"/proc/sys/fs/binfmt_misc/register",
+	"/proc/sys/vm/drop_caches",
+	"/proc/sys/vm/panic_on_oom",
+	"/proc/sys/net/core/bpf_jit_enable",
+	"/proc/sys/net/core/bpf_jit_harden",
+	"/proc/sys/net/core/bpf_jit_kallsyms",
 }
 
 // ---------------------------------------------------------------------------
@@ -364,14 +381,7 @@ func handlePIDCheck(
 // Protected-path operations
 // ---------------------------------------------------------------------------
 
-// handleOpenat blocks opens of /proc/1/* sensitive paths from sidecar
-// PID namespace processes.
-//
-//	openat(dirfd, pathname, flags, mode)
-//	args[0]=dirfd, args[1]=pathname ptr
-//
-// Scoped to sidecar PID NS only. Nested container processes skip entirely.
-// Only blocks /proc/1/* paths — all other opens get CONTINUE immediately.
+// handleOpenat applies policy to openat() calls.
 func handleOpenat(
 	notif *seccompNotif,
 	resp *seccompNotifResp,
@@ -379,11 +389,6 @@ func handleOpenat(
 	myPIDNS string,
 	notifFD int,
 ) {
-	if !isSidecarPIDNS(pid, myPIDNS) {
-		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
-		return
-	}
-
 	pathname, err := readStringFromPID(pid, notif.Data.Args[1])
 	if err != nil {
 		resp.Error = -syscallErrno(err)
@@ -391,19 +396,83 @@ func handleOpenat(
 		return
 	}
 
+	flags := notif.Data.Args[2]
 	path := resolvePath(pathname, pid)
 
 	if !checkNotifValid(notifFD, &notif.ID) {
 		return
 	}
 
-	if strings.HasPrefix(path, "/proc/1/") && slices.Contains(proc1Sensitive, path) {
+	// Skip the slice walk for paths that obviously can't match.
+	if !strings.HasPrefix(path, "/proc/") {
+		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		return
+	}
+
+	// /proc/1/* sensitive paths: block any access from sidecar PID NS.
+	// In a nested container's PID namespace /proc/1 refers to its own
+	// init process, not the supervisor.
+	if strings.HasPrefix(path, "/proc/1/") && slices.Contains(procSensitive, path) {
+		if !isSidecarPIDNS(pid, myPIDNS) {
+			resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+			return
+		}
 		resp.Error = -int32(unix.EACCES)
 		logf("BLOCKED openat path=%s pid=%d bin=%s", path, pid, exePath(pid))
 		return
 	}
 
+	// Host-affecting kernel control files: block writes from any
+	// context. These are global, not PID-NS-scoped -- a write changes
+	// host kernel behavior regardless of which container the writer
+	// lives in. Verify the resolved path is actually on procfs in the
+	// caller's mount namespace -- a placeholder file at the same name
+	// inside a chrooted build rootfs (buildah copier ensure) is on
+	// overlayfs and harmless.
+	accMode := flags & uint64(unix.O_ACCMODE)
+	if accMode != uint64(unix.O_RDONLY) && slices.Contains(procSensitive, path) {
+		if !pathOnProcfs(pid, pathname) {
+			resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+			return
+		}
+		resp.Error = -int32(unix.EACCES)
+		logf("BLOCKED openat(write) path=%s pid=%d flags=0x%x bin=%s",
+			path, pid, flags, exePath(pid))
+		return
+	}
+
 	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+}
+
+// pathOnProcfs returns true when the openat path argument, resolved
+// through the caller's mount namespace, lives on procfs. Falls back
+// to the parent directory when the file does not exist yet (the
+// O_CREAT|O_EXCL pattern that buildah's copier uses for mount-target
+// setup).
+func pathOnProcfs(pid uint32, raw string) bool {
+	if raw == "" {
+		return false
+	}
+	p := raw
+	if p[0] != '/' {
+		cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+		if err != nil {
+			return false
+		}
+		p = filepath.Join(cwd, p)
+	}
+	p = filepath.Clean(p)
+
+	target := fmt.Sprintf("/proc/%d/root%s", pid, p)
+	var fs unix.Statfs_t
+	if err := unix.Statfs(target, &fs); err == nil {
+		return uint64(fs.Type) == procSuperMagic
+	}
+	parent := fmt.Sprintf("/proc/%d/root%s", pid, filepath.Dir(p))
+	if err := unix.Statfs(parent, &fs); err == nil {
+		return uint64(fs.Type) == procSuperMagic
+	}
+	return false
 }
 
 // checkDualPathProtected is the common logic for linkat and renameat2:
