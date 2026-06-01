@@ -199,7 +199,7 @@ func agentRestoreChunks(policy string, dests []AllowEntry, privRanges []string, 
 		chunkCount = 1
 	}
 	streams := make([]string, 0, chunkCount)
-	for ci := 0; ci < chunkCount; ci++ {
+	for ci := range chunkCount {
 		var buf strings.Builder
 		buf.WriteString(header)
 		if ci == 0 {
@@ -479,19 +479,7 @@ func portStr(port int) string {
 // maxRulesPerChunk to stay below the netlink batch send buffer ceiling; the
 // first chunk per protocol carries the flushes. Atomicity is per-chunk.
 func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state *FirewallState, scope string) error {
-	var table, allowChain, blockChain string
-	var entries []FirewallEntry
-	if scope == "pod" {
-		table = "mangle"
-		allowChain = chainPodAllow
-		blockChain = chainPodBlock
-		entries = state.Pod
-	} else {
-		table = "filter"
-		allowChain = chainAgentAllow
-		blockChain = chainAgentBlock
-		entries = state.Agent
-	}
+	table, allowChain, blockChain, entries := reconcileScope(state, scope)
 
 	for _, bin := range []string{binIPT4, binIPT6} {
 		isV6 := strings.Contains(bin, "ip6")
@@ -500,66 +488,105 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 			restoreBin = "/usr/sbin/ip6tables-restore"
 		}
 
-		var lines []string
-		for _, e := range entries {
-			chain := allowChain
-			if e.Action != "ACCEPT" {
-				chain = blockChain
-			}
-
-			rejectSuffix := ""
-			if e.Action == "REJECT" {
-				rejectType := "icmp-port-unreachable"
-				if isV6 {
-					rejectType = "icmp6-port-unreachable"
-				}
-				rejectSuffix = " --reject-with " + rejectType
-			}
-
-			for _, ip := range e.IPs {
-				if strings.Contains(ip, ":") != isV6 {
-					continue
-				}
-				portRule := ""
-				if e.Port > 0 {
-					portRule = fmt.Sprintf(" -p tcp --dport %d", e.Port)
-				}
-				lines = append(lines, fmt.Sprintf("-A %s -d %s%s -j %s%s\n", chain, ip, portRule, e.Action, rejectSuffix))
-			}
-		}
-
+		lines := buildEntryLines(entries, allowChain, blockChain, isV6)
 		header := fmt.Sprintf("*%s\n"+
 			":%s - [0:0]\n"+
 			":%s - [0:0]\n",
 			table, allowChain, blockChain)
 		flush := fmt.Sprintf("-F %s\n-F %s\n", allowChain, blockChain)
 
-		chunkCount := (len(lines) + maxRulesPerChunk - 1) / maxRulesPerChunk
-		if chunkCount == 0 {
-			chunkCount = 1
-		}
-		for ci := 0; ci < chunkCount; ci++ {
-			var buf strings.Builder
-			buf.WriteString(header)
-			if ci == 0 {
-				buf.WriteString(flush)
-			}
-			start := ci * maxRulesPerChunk
-			end := start + maxRulesPerChunk
-			if end > len(lines) {
-				end = len(lines)
-			}
-			for _, line := range lines[start:end] {
-				buf.WriteString(line)
-			}
-			buf.WriteString("COMMIT\n")
-
-			out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(buf.String()))
-			if err != nil {
-				return fmt.Errorf("reconcile %s: %w: %s", scope, err, out)
-			}
+		if err := submitChunks(ctx, rt, sidecar, restoreBin, header, flush, lines, scope); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// reconcileScope resolves the table and chain names plus the entry list for
+// the requested scope. Returns (table, allowChain, blockChain, entries).
+func reconcileScope(
+	state *FirewallState,
+	scope string,
+) (string, string, string, []FirewallEntry) {
+	if scope == "pod" {
+		return "mangle", chainPodAllow, chainPodBlock, state.Pod
+	}
+	return "filter", chainAgentAllow, chainAgentBlock, state.Agent
+}
+
+// buildEntryLines renders firewall entries to iptables-restore "-A ..." lines
+// for the requested IP version (entries containing addresses of the other
+// version are skipped).
+func buildEntryLines(entries []FirewallEntry, allowChain, blockChain string, isV6 bool) []string {
+	var lines []string
+	for _, e := range entries {
+		chain := allowChain
+		if e.Action != "ACCEPT" {
+			chain = blockChain
+		}
+		rejectSuffix := rejectSuffixFor(e.Action, isV6)
+		for _, ip := range e.IPs {
+			if strings.Contains(ip, ":") != isV6 {
+				continue
+			}
+			portRule := ""
+			if e.Port > 0 {
+				portRule = fmt.Sprintf(" -p tcp --dport %d", e.Port)
+			}
+			lines = append(lines, fmt.Sprintf("-A %s -d %s%s -j %s%s\n",
+				chain, ip, portRule, e.Action, rejectSuffix))
+		}
+	}
+	return lines
+}
+
+// rejectSuffixFor returns the " --reject-with <type>" suffix for REJECT
+// actions on the given IP version, or "" otherwise.
+func rejectSuffixFor(action string, isV6 bool) string {
+	if action != "REJECT" {
+		return ""
+	}
+	if isV6 {
+		return " --reject-with icmp6-port-unreachable"
+	}
+	return " --reject-with icmp-port-unreachable"
+}
+
+// submitChunks pipes the generated lines into iptables-restore in chunks of
+// maxRulesPerChunk. The first chunk carries the flushes so atomicity is
+// per-chunk only.
+func submitChunks(
+	ctx context.Context,
+	rt container.Runtime,
+	sidecar, restoreBin, header, flush string,
+	lines []string,
+	scope string,
+) error {
+	chunkCount := (len(lines) + maxRulesPerChunk - 1) / maxRulesPerChunk
+	if chunkCount == 0 {
+		chunkCount = 1
+	}
+	for ci := range chunkCount {
+		var buf strings.Builder
+		buf.WriteString(header)
+		if ci == 0 {
+			buf.WriteString(flush)
+		}
+		start := ci * maxRulesPerChunk
+		end := start + maxRulesPerChunk
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for _, line := range lines[start:end] {
+			buf.WriteString(line)
+		}
+		buf.WriteString("COMMIT\n")
+
+		out, err := rt.ExecStdin(ctx, sidecar, []string{restoreBin, "--noflush"}, []byte(buf.String()))
+		if err != nil {
+			return fmt.Errorf("reconcile %s: %w: %s", scope, err, out)
+		}
+	}
 	return nil
 }

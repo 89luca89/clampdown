@@ -132,7 +132,7 @@ func agentConfig(
 		connectPorts = append(connectPorts, route.Port)
 		keyEnv = proxyAgentEnv(ag, route)
 	}
-	
+
 	// we need to allow also additional port from allow entries.
 	for _, e := range allowEntries {
 		if e.Port == 0 {

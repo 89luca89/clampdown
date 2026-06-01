@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,7 +19,7 @@ const (
 
 // iptRun executes an iptables/ip6tables command, forwarding stderr.
 func iptRun(bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(context.Background(), bin, args...)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

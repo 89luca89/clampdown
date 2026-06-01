@@ -129,14 +129,15 @@ func resolveDomain(domain string) []string {
 // IP or CIDR that bypasses DNS. Port defaults to 443 when absent or invalid;
 // port 0 signals "all ports" to rule emitters. IPv6 literals must be bracketed
 // to carry a port ("[::1]:443").
-func splitSpec(s string) (host string, port int, literal bool) {
-	host = strings.TrimSpace(s)
-	port = defaultAllowPort
+func splitSpec(s string) (string, int, bool) {
+	host := strings.TrimSpace(s)
+	port := defaultAllowPort
 	if h, p, err := net.SplitHostPort(host); err == nil {
 		if n, perr := strconv.Atoi(p); perr == nil && n >= 0 && n <= 65535 {
 			host, port = h, n
 		}
 	}
+	literal := false
 	if net.ParseIP(host) != nil {
 		literal = true
 	} else if _, _, err := net.ParseCIDR(host); err == nil {

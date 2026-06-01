@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -163,6 +164,8 @@ func main() {
 	// spawned from this same thread so it inherits the filter via clone().
 	runtime.LockOSThread()
 
+	verifyNotifStructSizes()
+
 	filter := buildNotifFilter(auditArch, interceptedSyscalls)
 	notifFD := installFilter(filter)
 
@@ -173,7 +176,7 @@ func main() {
 
 	go runSupervisor(notifFD, protected, workdir, allowlist)
 
-	cmd := exec.Command(os.Args[1], os.Args[2:]...)
+	cmd := exec.CommandContext(context.Background(), os.Args[1], os.Args[2:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

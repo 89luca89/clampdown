@@ -170,7 +170,7 @@ func installFilter(filter []unix.SockFilter) int {
 
 // seccompNotifSizes queries the kernel for the expected sizes of the
 // seccomp_notif and seccomp_notif_resp structs. Returns 0,0 on error.
-func seccompNotifSizes() (notifSz, respSz uint16) {
+func seccompNotifSizes() (uint16, uint16) {
 	type notifSizes struct {
 		Notif     uint16
 		NotifResp uint16
@@ -184,7 +184,7 @@ func seccompNotifSizes() (notifSz, respSz uint16) {
 	return sizes.Notif, sizes.NotifResp
 }
 
-func init() {
+func verifyNotifStructSizes() {
 	kNotif, kResp := seccompNotifSizes()
 	if kNotif == 0 {
 		return
