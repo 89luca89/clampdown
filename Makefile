@@ -95,23 +95,23 @@ binaries: $(SIDECAR_BINS) container-images/proxy/auth-proxy launcher
 # --- Container images (stamp-based, skip when sources unchanged) ---
 
 .sidecar.stamp: $(SIDECAR_BINS) $(SIDECAR_SRCS)
-	$(CTR) build -f container-images/sidecar/Containerfile -t $(SIDECAR_IMAGE) container-images/sidecar/
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/sidecar/Containerfile -t $(SIDECAR_IMAGE) container-images/sidecar/
 	@touch $@
 
 .claude.stamp: container-images/sidecar/seal/sandbox-seal $(CLAUDE_SRCS)
-	$(CTR) build -f container-images/claude/Containerfile -t $(CLAUDE_IMAGE) container-images/
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/claude/Containerfile -t $(CLAUDE_IMAGE) container-images/
 	@touch $@
 
 .codex.stamp: container-images/sidecar/seal/sandbox-seal $(CODEX_SRCS)
-	$(CTR) build -f container-images/codex/Containerfile -t $(CODEX_IMAGE) container-images/
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/codex/Containerfile -t $(CODEX_IMAGE) container-images/
 	@touch $@
 
 .opencode.stamp: container-images/sidecar/seal/sandbox-seal $(OPENCODE_SRCS)
-	$(CTR) build -f container-images/opencode/Containerfile -t $(OPENCODE_IMAGE) container-images/
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/opencode/Containerfile -t $(OPENCODE_IMAGE) container-images/
 	@touch $@
 
 .proxy.stamp: container-images/proxy/auth-proxy container-images/sidecar/seal/sandbox-seal container-images/proxy/Containerfile
-	$(CTR) build -f container-images/proxy/Containerfile -t $(PROXY_IMAGE) container-images/
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/proxy/Containerfile -t $(PROXY_IMAGE) container-images/
 	@touch $@
 
 # --- Registry image builds (require REGISTRY and TAG) ---
