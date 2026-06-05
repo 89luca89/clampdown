@@ -127,9 +127,9 @@ func Run(args []string) error {
 				Sources: ucli.EnvVars("SANDBOX_MEMORY"),
 				Usage:   "Memory limit for containers (e.g. 4g, 8g)",
 			},
-			&ucli.StringFlag{
+			&ucli.IntFlag{
 				Name:    "cpus",
-				Value:   defaultStr(cfg.CPUs, "4"),
+				Value:   defaultInt(cfg.CPUs, 4),
 				Sources: ucli.EnvVars("SANDBOX_CPUS"),
 				Usage:   "CPU limit for containers (e.g. 4, 8)",
 			},
@@ -350,7 +350,7 @@ func runAgent(agName string, cfg Config) ucli.ActionFunc {
 			AgentImage:     resolveAgentImage(cmd.String("agent-image"), cfg, agName),
 			AgentPolicy:    cmd.String("agent-policy"),
 			AllowHooks:     cmd.Bool("allow-hooks"),
-			CPUs:           cmd.String("cpus"),
+			CPUs:           cmd.Int("cpus"),
 			EnableTripwire: cmd.Bool("tripwire"),
 			GH:             cmd.Bool("gh"),
 			GitConfig:      cmd.Bool("gitconfig"),
@@ -735,6 +735,13 @@ func prune(ctx context.Context, cmd *ucli.Command) error {
 
 func defaultStr(val, fallback string) string {
 	if val != "" {
+		return val
+	}
+	return fallback
+}
+
+func defaultInt(val, fallback int) int {
+	if val != 0 {
 		return val
 	}
 	return fallback

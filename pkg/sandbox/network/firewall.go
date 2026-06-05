@@ -206,10 +206,7 @@ func agentRestoreChunks(policy string, dests []AllowEntry, privRanges []string, 
 			buf.WriteString(prefix)
 		}
 		start := ci * maxRulesPerChunk
-		end := start + maxRulesPerChunk
-		if end > len(dests) {
-			end = len(dests)
-		}
+		end := min(start+maxRulesPerChunk, len(dests))
 		for _, e := range dests[start:end] {
 			writeEntry(&buf, e)
 		}
@@ -574,10 +571,7 @@ func submitChunks(
 			buf.WriteString(flush)
 		}
 		start := ci * maxRulesPerChunk
-		end := start + maxRulesPerChunk
-		if end > len(lines) {
-			end = len(lines)
-		}
+		end := min(start+maxRulesPerChunk, len(lines))
 		for _, line := range lines[start:end] {
 			buf.WriteString(line)
 		}

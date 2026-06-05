@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -567,14 +568,7 @@ func TestProcSensitive_HostKernelControlFiles(t *testing.T) {
 		"/proc/sys/net/core/bpf_jit_kallsyms",
 	}
 	for _, path := range hostKernel {
-		found := false
-		for _, p := range procSensitive {
-			if p == path {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(procSensitive, path) {
 			t.Errorf("procSensitive missing host-kernel control file: %q", path)
 		}
 	}

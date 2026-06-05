@@ -51,6 +51,20 @@ func (d *Docker) command(ctx context.Context, args ...string) *exec.Cmd {
 func (d *Docker) uid() string { return strconv.Itoa(os.Getuid()) }
 func (d *Docker) gid() string { return strconv.Itoa(os.Getgid()) }
 
+// HostCPUs returns the CPU count the runtime daemon will accept for --cpus.
+func (d *Docker) HostCPUs(ctx context.Context) (int, error) {
+	cmd := d.command(ctx, "info", "--format", "{{.NCPU}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("docker info: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse cpus %q: %w", string(out), err)
+	}
+	return n, nil
+}
+
 // probe queries the Docker daemon once and caches the result.
 // All capability checks (SELinux, native, Docker Desktop) read from the cache.
 func (d *Docker) probe() {
@@ -118,8 +132,8 @@ func (d *Docker) StartSidecar(ctx context.Context, cfg SidecarContainerConfig) e
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))
@@ -193,8 +207,8 @@ func (d *Docker) StartProxy(ctx context.Context, cfg ProxyContainerConfig) error
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))
@@ -266,8 +280,8 @@ func (d *Docker) StartAgent(ctx context.Context, cfg AgentContainerConfig) error
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))

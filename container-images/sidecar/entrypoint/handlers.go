@@ -577,6 +577,9 @@ func readPPID(pid uint32) uint32 {
 		}
 		return uint32(v)
 	}
+	// Scanner failures (line too long, read error) are treated identically
+	// to "no PPid line found" -- caller gets 0 either way.
+	_ = scanner.Err()
 	return 0
 }
 

@@ -40,7 +40,7 @@ type Options struct {
 	AgentImage     string
 	AgentPolicy    string
 	AllowHooks     bool
-	CPUs           string
+	CPUs           int
 	EnableTripwire bool
 	GH             bool
 	MaskPaths      []string
@@ -99,6 +99,15 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	err := runPreflightChecks(ctx, rt)
 	if err != nil {
 		return "", err
+	}
+
+	// Clamp the CPU request to whatever the runtime daemon will accept.
+	hostCPU, err := rt.HostCPUs(ctx)
+	if err != nil {
+		return "", err
+	}
+	if hostCPU < opts.CPUs {
+		opts.CPUs = hostCPU
 	}
 
 	// Resolve workdir: if HOME, use scratch dir.

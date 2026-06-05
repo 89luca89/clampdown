@@ -18,6 +18,7 @@ type Runtime interface {
 	CleanStale(ctx context.Context, prefix string)
 	Exec(ctx context.Context, container string, cmd []string, env map[string]string) ([]byte, error)
 	ExecStdin(ctx context.Context, container string, cmd []string, stdin []byte) ([]byte, error)
+	HostCPUs(ctx context.Context) (int, error)
 	ImageID(ctx context.Context, image string) (string, error)
 	IsDockerDesktop(ctx context.Context) bool
 	IsNative(ctx context.Context) (bool, error)
@@ -123,7 +124,7 @@ type ProxyContainerConfig struct {
 
 // Resources defines container resource limits.
 type Resources struct {
-	CPUs       string
+	CPUs       int
 	Memory     string
 	PIDLimit   int
 	UlimitCore string

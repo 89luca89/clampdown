@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,20 @@ type Podman struct {
 func (p *Podman) Name() string                           { return namePodman }
 func (p *Podman) SetDebug(v bool)                        { p.debug = v }
 func (p *Podman) IsDockerDesktop(_ context.Context) bool { return false }
+
+// HostCPUs returns the CPU count the runtime daemon will accept for --cpus.
+func (p *Podman) HostCPUs(ctx context.Context) (int, error) {
+	cmd := p.command(ctx, "info", "--format", "{{.Host.CPUs}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("podman info: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse cpus %q: %w", string(out), err)
+	}
+	return n, nil
+}
 
 // command builds an exec.Cmd with the runtime binary and global flags
 // (e.g. --log-level=debug) prepended before the subcommand args.
@@ -65,8 +80,8 @@ func (p *Podman) StartSidecar(ctx context.Context, cfg SidecarContainerConfig) e
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))
@@ -145,8 +160,8 @@ func (p *Podman) StartProxy(ctx context.Context, cfg ProxyContainerConfig) error
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))
@@ -215,8 +230,8 @@ func (p *Podman) StartAgent(ctx context.Context, cfg AgentContainerConfig) error
 	if cfg.Resources.Memory != "" {
 		args = append(args, "--memory="+cfg.Resources.Memory)
 	}
-	if cfg.Resources.CPUs != "" {
-		args = append(args, "--cpus="+cfg.Resources.CPUs)
+	if cfg.Resources.CPUs > 0 {
+		args = append(args, fmt.Sprintf("--cpus=%d", cfg.Resources.CPUs))
 	}
 	if cfg.Resources.PIDLimit > 0 {
 		args = append(args, fmt.Sprintf("--pids-limit=%d", cfg.Resources.PIDLimit))
