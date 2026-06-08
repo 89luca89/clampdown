@@ -50,6 +50,12 @@ OPENCODE_SRCS     := container-images/opencode/Containerfile $(HELPERS_SRC) $(NE
 all: .sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .proxy.stamp launcher
 
 lint:
+	# Avoid if x := foo; condition() type of expressions
+	@if grep -rnE --include='*.go' --exclude='*_test.go' 'if[[:space:]]+.*:=.*;' pkg/ container-images/ main.go 2>/dev/null; then \
+		echo "" >&2; \
+		echo "lint: if-init-statement forbidden (see AGENTS.md Go Style)" >&2; \
+		exit 1; \
+	fi
 	@gopls check -severity=hint $$(find * -iname "*.go")
 	@golangci-lint run ./...
 

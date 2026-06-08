@@ -492,7 +492,8 @@ func reconcile(ctx context.Context, rt container.Runtime, sidecar string, state 
 			table, allowChain, blockChain)
 		flush := fmt.Sprintf("-F %s\n-F %s\n", allowChain, blockChain)
 
-		if err := submitChunks(ctx, rt, sidecar, restoreBin, header, flush, lines, scope); err != nil {
+		err := submitChunks(ctx, rt, sidecar, restoreBin, header, flush, lines, scope)
+		if err != nil {
 			return err
 		}
 	}

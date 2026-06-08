@@ -126,10 +126,12 @@ func maskSensitivePaths() {
 		"/proc/version",
 		"/sys/kernel/vmcoreinfo",
 	} {
-		if _, err := os.Stat(p); err != nil {
+		_, err := os.Stat(p)
+		if err != nil {
 			continue
 		}
-		if err := unix.Mount("/dev/null", p, "", unix.MS_BIND, ""); err != nil {
+		err = unix.Mount("/dev/null", p, "", unix.MS_BIND, "")
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: mask %s: %v\n", p, err)
 		}
 	}

@@ -69,7 +69,8 @@ func ResolveAllowEntries(raw []string) []AllowEntry {
 	var out []AllowEntry
 	for _, es := range results {
 		for _, e := range es {
-			if _, ok := seen[e]; ok {
+			_, ok := seen[e]
+			if ok {
 				continue
 			}
 			seen[e] = struct{}{}
@@ -132,16 +133,21 @@ func resolveDomain(domain string) []string {
 func splitSpec(s string) (string, int, bool) {
 	host := strings.TrimSpace(s)
 	port := defaultAllowPort
-	if h, p, err := net.SplitHostPort(host); err == nil {
-		if n, perr := strconv.Atoi(p); perr == nil && n >= 0 && n <= 65535 {
+	h, p, err := net.SplitHostPort(host)
+	if err == nil {
+		n, perr := strconv.Atoi(p)
+		if perr == nil && n >= 0 && n <= 65535 {
 			host, port = h, n
 		}
 	}
 	literal := false
 	if net.ParseIP(host) != nil {
 		literal = true
-	} else if _, _, err := net.ParseCIDR(host); err == nil {
-		literal = true
+	} else {
+		_, _, err = net.ParseCIDR(host)
+		if err == nil {
+			literal = true
+		}
 	}
 	return host, port, literal
 }

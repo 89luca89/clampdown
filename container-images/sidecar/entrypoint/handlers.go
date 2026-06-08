@@ -465,11 +465,13 @@ func pathOnProcfs(pid uint32, raw string) bool {
 
 	target := fmt.Sprintf("/proc/%d/root%s", pid, p)
 	var fs unix.Statfs_t
-	if err := unix.Statfs(target, &fs); err == nil {
+	err := unix.Statfs(target, &fs)
+	if err == nil {
 		return uint64(fs.Type) == procSuperMagic
 	}
 	parent := fmt.Sprintf("/proc/%d/root%s", pid, filepath.Dir(p))
-	if err := unix.Statfs(parent, &fs); err == nil {
+	err = unix.Statfs(parent, &fs)
+	if err == nil {
 		return uint64(fs.Type) == procSuperMagic
 	}
 	return false
