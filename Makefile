@@ -4,6 +4,7 @@ GOARCH   ?= $(shell go env GOARCH)
 REGISTRY ?=
 TAG      ?= latest
 PLATFORM ?= linux/$(GOARCH)
+PODMAN_VERSION   ?= v5.8.2
 
 SIDECAR_IMAGE  := clampdown-sidecar:latest
 CLAUDE_IMAGE   := clampdown-claude:latest
@@ -101,7 +102,8 @@ binaries: $(SIDECAR_BINS) container-images/proxy/auth-proxy launcher
 # --- Container images (stamp-based, skip when sources unchanged) ---
 
 .sidecar.stamp: $(SIDECAR_BINS) $(SIDECAR_SRCS)
-	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/sidecar/Containerfile -t $(SIDECAR_IMAGE) container-images/sidecar/
+	wget -O  container-images/sidecar/podman-linux-$(GOARCH).tar.gz -c https://github.com/mgoltzsche/podman-static/releases/download/$(PODMAN_VERSION)/podman-linux-$(GOARCH).tar.gz
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) --build-arg PODMAN_VERSION="$(PODMAN_VERSION)" -f container-images/sidecar/Containerfile -t $(SIDECAR_IMAGE) container-images/sidecar/
 	@touch $@
 
 .claude.stamp: container-images/sidecar/seal/sandbox-seal $(CLAUDE_SRCS)
@@ -237,6 +239,7 @@ undev:
 clean:
 	rm -f clampdown \
 		.sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .proxy.stamp \
+		container-images/sidecar/podman-linux-$(GOARCH).tar.gz \
 		container-images/sidecar/seal/sandbox-seal \
 		container-images/sidecar/entrypoint/entrypoint \
 		container-images/sidecar/log/log \
