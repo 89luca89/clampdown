@@ -44,6 +44,9 @@ func (c *Claude) ConfigOverlays() []Mount {
 func (c *Claude) Env() map[string]string {
 	return map[string]string{
 		"IS_SANDBOX": "1",
+		// Suppress non-essential egress (auto-updater, telemetry, error
+		// reporting, plugin-marketplace fetch) the agent firewall blocks.
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 	}
 }
 
