@@ -364,3 +364,58 @@ func TestSidecarProtectedPaths_MaskedExcluded(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteSandboxPrompt_Append(t *testing.T) {
+	home := t.TempDir()
+	ag := &agent.OpenCode{} // non-claude: skips the onboarding write path
+
+	// WriteSandboxPrompt maps the container PromptFile() into homeDir the
+	// same way, via filepath.Rel(agent.Home, ...).
+	rel, err := filepath.Rel(agent.Home, ag.PromptFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(home, rel)
+	base := agent.SandboxPrompt(ag.Name())
+
+	// Empty append -> file equals the base prompt exactly.
+	err = sandbox.WriteSandboxPrompt(ag, home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != base {
+		t.Error("empty append: file should equal base prompt")
+	}
+
+	// Non-empty append -> base prompt followed by the appended text.
+	const extra = "House rule: no force pushes."
+	want := base + "\n\n" + extra + "\n"
+	err = sandbox.WriteSandboxPrompt(ag, home, extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("append: got %q, want %q", got, want)
+	}
+
+	// Idempotent: same input rewrites to identical content.
+	err = sandbox.WriteSandboxPrompt(ag, home, extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("idempotent append: got %q, want %q", got, want)
+	}
+}

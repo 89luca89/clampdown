@@ -401,6 +401,8 @@ Credentials are opt-in. Nothing is forwarded by default.
 | `--runtime` | auto | Container runtime: `podman`, `docker`, `nerdctl` |
 | `--tripwire` | off | Kill session on protected path modification (restores on exit either way) |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| `--append-system-prompt` | -- | Append text to clampdown's injected system prompt (all agents) |
+| `--append-system-prompt-file` | -- | Append a host file's contents to clampdown's injected system prompt |
 
 **Tripwire** monitors protected host paths via inotify and kills the session
 immediately if any are modified -- the last line of defense against a full

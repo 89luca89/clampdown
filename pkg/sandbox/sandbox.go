@@ -35,26 +35,27 @@ const (
 
 // Options configures a sandbox run.
 type Options struct {
-	AgentAllow     string
-	AgentArgs      []string
-	AgentImage     string
-	AgentPolicy    string
-	AllowHooks     bool
-	CPUs           int
-	EnableTripwire bool
-	GH             bool
-	MaskPaths      []string
-	GitConfig      bool
-	Memory         string
-	PodPolicy      string
-	ProxyImage     string
-	ProtectPaths   []string
-	RegistryAuth   bool
-	RequireDigest  string
-	SidecarImage   string
-	SSH            bool
-	UnmaskPaths    []string
-	Workdir        string
+	AgentAllow         string
+	AgentArgs          []string
+	AgentImage         string
+	AgentPolicy        string
+	AllowHooks         bool
+	AppendSystemPrompt string
+	CPUs               int
+	EnableTripwire     bool
+	GH                 bool
+	MaskPaths          []string
+	GitConfig          bool
+	Memory             string
+	PodPolicy          string
+	ProxyImage         string
+	ProtectPaths       []string
+	RegistryAuth       bool
+	RequireDigest      string
+	SidecarImage       string
+	SSH                bool
+	UnmaskPaths        []string
+	Workdir            string
 }
 
 // SessionState persists session metadata for stop/delete operations.
@@ -153,7 +154,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 
 	// Write sandbox prompt to persistent HOME before building mounts so
 	// HOME-relative protected paths exist when ProtectMount runs.
-	err = WriteSandboxPrompt(ag, p.Home)
+	err = WriteSandboxPrompt(ag, p.Home, opts.AppendSystemPrompt)
 	if err != nil {
 		return "", fmt.Errorf("sandbox prompt: %w", err)
 	}

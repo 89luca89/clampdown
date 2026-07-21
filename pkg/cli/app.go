@@ -165,6 +165,14 @@ func Run(args []string) error {
 				Name:  "unmask",
 				Usage: "Remove paths from the default mask list (e.g. --unmask .env)",
 			},
+			&ucli.StringFlag{
+				Name:  "append-system-prompt",
+				Usage: "Append text to clampdown's injected system prompt (all agents)",
+			},
+			&ucli.StringFlag{
+				Name:  "append-system-prompt-file",
+				Usage: "Append the contents of a host file to clampdown's injected system prompt",
+			},
 		},
 		Commands: append(agentCommands(cfg),
 			&ucli.Command{
@@ -344,27 +352,36 @@ func runAgent(agName string, cfg Config) ucli.ActionFunc {
 			return fmt.Errorf("abs: %w", err)
 		}
 
+		appendPrompt, err := resolveAppendPrompt(
+			cmd.String("append-system-prompt"),
+			cmd.String("append-system-prompt-file"),
+		)
+		if err != nil {
+			return err
+		}
+
 		opts := sandbox.Options{
-			AgentAllow:     cmd.String("agent-allow"),
-			AgentArgs:      cmd.Args().Slice(),
-			AgentImage:     resolveAgentImage(cmd.String("agent-image"), cfg, agName),
-			AgentPolicy:    cmd.String("agent-policy"),
-			AllowHooks:     cmd.Bool("allow-hooks"),
-			CPUs:           cmd.Int("cpus"),
-			EnableTripwire: cmd.Bool("tripwire"),
-			GH:             cmd.Bool("gh"),
-			GitConfig:      cmd.Bool("gitconfig"),
-			MaskPaths:      append(cfg.MaskPaths, cmd.StringSlice("mask")...),
-			Memory:         cmd.String("memory"),
-			PodPolicy:      cmd.String("pod-policy"),
-			ProxyImage:     cmd.String("proxy-image"),
-			ProtectPaths:   append(cfg.ProtectPaths, cmd.StringSlice("protect")...),
-			RegistryAuth:   cmd.Bool("registry-auth"),
-			RequireDigest:  cmd.String("require-digest"),
-			SidecarImage:   cmd.String("sidecar-image"),
-			SSH:            cmd.Bool("ssh"),
-			UnmaskPaths:    append(cfg.UnmaskPaths, cmd.StringSlice("unmask")...),
-			Workdir:        workdir,
+			AgentAllow:         cmd.String("agent-allow"),
+			AgentArgs:          cmd.Args().Slice(),
+			AgentImage:         resolveAgentImage(cmd.String("agent-image"), cfg, agName),
+			AgentPolicy:        cmd.String("agent-policy"),
+			AllowHooks:         cmd.Bool("allow-hooks"),
+			AppendSystemPrompt: appendPrompt,
+			CPUs:               cmd.Int("cpus"),
+			EnableTripwire:     cmd.Bool("tripwire"),
+			GH:                 cmd.Bool("gh"),
+			GitConfig:          cmd.Bool("gitconfig"),
+			MaskPaths:          append(cfg.MaskPaths, cmd.StringSlice("mask")...),
+			Memory:             cmd.String("memory"),
+			PodPolicy:          cmd.String("pod-policy"),
+			ProxyImage:         cmd.String("proxy-image"),
+			ProtectPaths:       append(cfg.ProtectPaths, cmd.StringSlice("protect")...),
+			RegistryAuth:       cmd.Bool("registry-auth"),
+			RequireDigest:      cmd.String("require-digest"),
+			SidecarImage:       cmd.String("sidecar-image"),
+			SSH:                cmd.Bool("ssh"),
+			UnmaskPaths:        append(cfg.UnmaskPaths, cmd.StringSlice("unmask")...),
+			Workdir:            workdir,
 		}
 
 		sessionID, err := sandbox.Run(ctx, rt, ag, opts)
@@ -755,4 +772,24 @@ func resolveAgentImage(flagVal string, cfg Config, agName string) string {
 		return flagVal
 	}
 	return cfg.AgentImages[agName]
+}
+
+// resolveAppendPrompt combines --append-system-prompt-file (read from the
+// host) and --append-system-prompt into the text appended to clampdown's
+// injected prompt. File contents come first, then the inline string.
+func resolveAppendPrompt(inline, file string) (string, error) {
+	var parts []string
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("append-system-prompt-file: %w", err)
+		}
+		if s := strings.TrimSpace(string(data)); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if s := strings.TrimSpace(inline); s != "" {
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "\n\n"), nil
 }

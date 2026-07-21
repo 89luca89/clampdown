@@ -338,12 +338,14 @@ func SidecarMaskedPaths(workdir string, masked []agent.MaskedPath) ([]container.
 
 // WriteSandboxPrompt writes the sandbox instructions to the agent's
 // PromptFile() path inside the persistent HOME directory on the host.
+// appendPrompt, if non-empty, is appended after the sandbox instructions
+// so it becomes part of the injected system prompt for every agent.
 // The file is written only if missing or stale (content changed).
 // Each agent discovers this file via its native mechanism:
 //   - Claude: --append-system-prompt-file (passed via Args)
 //   - OpenCode: ~/.config/opencode/instructions.md (auto-discovered)
 //   - Codex: ~/.codex/config.toml -> model_instructions_file
-func WriteSandboxPrompt(ag agent.Agent, homeDir string) error {
+func WriteSandboxPrompt(ag agent.Agent, homeDir, appendPrompt string) error {
 	// Claude requires onboarding to be marked complete before it accepts
 	// API key auth. Ensure the flag is set in .claude.json.
 	if ag.Name() == "claude" {
@@ -361,6 +363,9 @@ func WriteSandboxPrompt(ag agent.Agent, homeDir string) error {
 	hostPath := filepath.Join(homeDir, rel)
 
 	prompt := agent.SandboxPrompt(ag.Name())
+	if appendPrompt != "" {
+		prompt = prompt + "\n\n" + appendPrompt + "\n"
+	}
 
 	// Write only if missing or content changed.
 	existing, readErr := os.ReadFile(hostPath)
