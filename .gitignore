@@ -18,4 +18,8 @@ future
 .cache
 .home
 .*.stamp
+*.log
+*.tar.gz
 tags
+reports/
+plans/
