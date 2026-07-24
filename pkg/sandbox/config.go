@@ -340,6 +340,8 @@ func SidecarMaskedPaths(workdir string, masked []agent.MaskedPath) ([]container.
 // PromptFile() path inside the persistent HOME directory on the host.
 // appendPrompt, if non-empty, is appended after the sandbox instructions
 // so it becomes part of the injected system prompt for every agent.
+// The clampdown skill is always folded in between the base instructions and
+// appendPrompt, so its guidance is loaded every session for every agent.
 // The file is written only if missing or stale (content changed).
 // Each agent discovers this file via its native mechanism:
 //   - Claude: --append-system-prompt-file (passed via Args)
@@ -363,6 +365,7 @@ func WriteSandboxPrompt(ag agent.Agent, homeDir, appendPrompt string) error {
 	hostPath := filepath.Join(homeDir, rel)
 
 	prompt := agent.SandboxPrompt(ag.Name())
+	prompt = prompt + "\n\n" + agent.SandboxSkill(ag.Name()) + "\n"
 	if appendPrompt != "" {
 		prompt = prompt + "\n\n" + appendPrompt + "\n"
 	}

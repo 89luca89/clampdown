@@ -31,6 +31,10 @@ argument-hint: [error or topic]
 
 # Clampdown Sandbox Reference
 
+## Persistence
+
+ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if unsure.
+
 ## Current Session
 ` + "```" + `!
 echo "Session: $SANDBOX_SESSION"

@@ -376,7 +376,7 @@ func TestWriteSandboxPrompt_Append(t *testing.T) {
 		t.Fatal(err)
 	}
 	promptPath := filepath.Join(home, rel)
-	base := agent.SandboxPrompt(ag.Name())
+	base := agent.SandboxPrompt(ag.Name()) + "\n\n" + agent.SandboxSkill(ag.Name()) + "\n"
 
 	// Empty append -> file equals the base prompt exactly.
 	err = sandbox.WriteSandboxPrompt(ag, home, "")
