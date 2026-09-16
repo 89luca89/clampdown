@@ -118,3 +118,11 @@ func (o *OpenCode) ProxyEnvOverride(routes []ProxyRoute) map[string]string {
 	data, _ := json.Marshal(cfg)
 	return map[string]string{"OPENCODE_CONFIG_CONTENT": string(data)}
 }
+
+// EnvAllowlist admits only OPENCODE_MODEL. The other OPENCODE_ vars repoint the
+// CLI at a different config (OPENCODE_CONFIG, OPENCODE_CONFIG_DIR) or are owned
+// by the sandbox (OPENCODE_CONFIG_CONTENT wires the proxy), and provider keys
+// are owned by the auth proxy.
+func (o *OpenCode) EnvAllowlist() EnvAllow {
+	return EnvAllow{Names: []string{"OPENCODE_MODEL"}}
+}

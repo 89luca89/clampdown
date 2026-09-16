@@ -55,6 +55,12 @@ func (c *Codex) ProxyRoutes() []ProxyRoute {
 
 func (c *Codex) ProxyEnvOverride(_ []ProxyRoute) map[string]string { return nil }
 
+// EnvAllowlist is empty: Codex is configured through the config.toml clampdown
+// writes and through passthrough CLI args, not environment variables. Its only
+// env vars are CODEX_HOME (set by the sandbox) and provider credentials (owned
+// by the auth proxy).
+func (c *Codex) EnvAllowlist() EnvAllow { return EnvAllow{} }
+
 // PrepareCodexHome seeds the Codex auth/config files inside the agent's
 // persistent HOME directory. In subscription mode the host's
 // ~/.codex/auth.json is copied in once per session (or refreshed when

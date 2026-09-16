@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -110,6 +111,7 @@ func agentConfig(
 	mounts []container.MountSpec, seccompPath string,
 	homeDir string, route *agent.ProxyRoute,
 	allowEntries []network.AllowEntry,
+	rcEnv map[string]string,
 ) container.AgentContainerConfig {
 	tmpfs := []container.TmpfsSpec{
 		{Path: "/run", Size: "256m", NoExec: true, NoSuid: true},
@@ -159,15 +161,19 @@ func agentConfig(
 			Memory: opts.Memory, CPUs: opts.CPUs,
 			PIDLimit: agentPIDLimit, UlimitCore: "0:0",
 		},
-		Env: MergeEnv(map[string]string{
+		// Merge order (last wins): host terminal vars, clampdown infra vars,
+		// agent defaults, injectable .clampdownrc vars, proxy vars. User rc
+		// vars override agent defaults (e.g. model names) but never the proxy
+		// wiring or clampdown's infra vars, which the per-agent allowlist in
+		// injectableRCEnv never admits.
+		Env: MergeEnv(hostTerminalEnv(), map[string]string{
 			"CONTAINER_HOST":  container.SidecarAPI,
 			"DOCKER_HOST":     container.SidecarAPI,
 			"HOME":            Home,
 			"SANDBOX_CACHE":   filepath.Join(opts.Workdir, "."+ag.Name(), session),
 			"SANDBOX_POLICY":  policyJSON,
 			"SANDBOX_SESSION": session,
-			"TERM":            os.Getenv("TERM"),
-		}, ag.Env(), keyEnv),
+		}, ag.Env(), injectableRCEnv(ag, rcEnv), keyEnv),
 		Tmpfs:          tmpfs,
 		EntrypointArgs: ag.Args(opts.AgentArgs),
 	}
@@ -432,6 +438,81 @@ func MergeEnv(envs ...map[string]string) map[string]string {
 	return out
 }
 
+// upstreamOverrideEnv is the agent-agnostic .clampdownrc var that repoints the
+// auth proxy's upstream for routes that declare no BaseURLEnv (e.g. Codex). It
+// is consumed by resolveProxyUpstream and never injected into the agent.
+const upstreamOverrideEnv = "CLAMPDOWN_UPSTREAM"
+
+// injectableRCEnv returns the .clampdownrc entries injected into the agent
+// container. A name must be admitted by the agent's EnvAllowlist (its config
+// namespaces); everything else -- including clampdown's infra vars like
+// SANDBOX_POLICY and the CLAMPDOWN_UPSTREAM control var -- matches no allowlist
+// entry and is dropped. Admitted names are filtered further: proxy-managed
+// provider credentials and base URLs belong to the auth proxy, and any
+// remaining credential- or endpoint-shaped name (e.g. ANTHROPIC_AUTH_TOKEN,
+// ANTHROPIC_BEDROCK_BASE_URL) is stripped so it cannot ride in on a namespace
+// prefix.
+func injectableRCEnv(ag agent.Agent, rcEnv map[string]string) map[string]string {
+	allow := ag.EnvAllowlist()
+	proxyManaged := agent.ProxyManagedEnvNames()
+	out := make(map[string]string, len(rcEnv))
+	for k, v := range rcEnv {
+		if !allow.Allows(k) {
+			continue
+		}
+		if proxyManaged[k] {
+			continue
+		}
+		if isSensitiveEnvName(k) {
+			slog.Warn("ignoring credential-shaped env var from .clampdownrc", "key", k)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// sensitiveEnvSuffixes name-match secrets and network destinations. A config
+// namespace prefix (e.g. ANTHROPIC_) admits names it should not carry into the
+// agent, such as ANTHROPIC_AUTH_TOKEN or ANTHROPIC_VERTEX_BASE_URL; matching
+// one of these suffixes strips them.
+var sensitiveEnvSuffixes = []string{
+	"_API_KEY", "_AUTH_TOKEN", "_OAUTH_TOKEN", "_TOKEN",
+	"_SECRET", "_PASSWORD", "_PASSPHRASE", "_CREDENTIALS",
+	"_PRIVATE_KEY", "_KEY", "_CERT", "_CERTIFICATE", "_BASE_URL",
+}
+
+func isSensitiveEnvName(name string) bool {
+	for _, s := range sensitiveEnvSuffixes {
+		if strings.HasSuffix(name, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostTerminalEnv returns terminal identification vars from the host.
+// Empty values are dropped so the container sees no key rather than a
+// blank one, which some tools read as "capability present".
+func hostTerminalEnv() map[string]string {
+	keys := []string{
+		"TERM", "COLORTERM",
+		"TERM_PROGRAM", "TERM_PROGRAM_VERSION",
+		"COLORFGBG",
+		"LANG", "LC_ALL", "LC_CTYPE",
+		"LS_COLORS",
+		"NO_COLOR", "FORCE_COLOR",
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		v := os.Getenv(k)
+		if v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // ActiveProxyRoute returns the first proxy route whose key is set on the
 // host or in rcEnv.
 func ActiveProxyRoute(ag agent.Agent, rcEnv map[string]string) *agent.ProxyRoute {
@@ -451,6 +532,47 @@ func ActiveProxyRoute(ag agent.Agent, rcEnv map[string]string) *agent.ProxyRoute
 	return nil
 }
 
+// resolveProxyUpstream returns the URL the auth proxy forwards to. A base-URL
+// var in .clampdownrc repoints it: the active route's BaseURLEnv (e.g.
+// ANTHROPIC_BASE_URL) when the route declares one, or the agent-agnostic
+// CLAMPDOWN_UPSTREAM fallback for routes without a BaseURLEnv (e.g. Codex and
+// OpenCode's provider-id routes). The built-in route.Upstream is used when
+// neither is set or the override is not a valid https URL.
+func resolveProxyUpstream(route *agent.ProxyRoute, rcEnv map[string]string) string {
+	override := ""
+	if route.BaseURLEnv != "" && rcEnv[route.BaseURLEnv] != "" {
+		override = rcEnv[route.BaseURLEnv]
+	} else if v := rcEnv[upstreamOverrideEnv]; v != "" {
+		override = v
+	}
+	if override == "" {
+		return route.Upstream
+	}
+
+	u, err := url.Parse(override)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		slog.Warn("ignoring invalid upstream override from .clampdownrc",
+			"value", override, "key", route.KeyEnv)
+		return route.Upstream
+	}
+	return override
+}
+
+// repointedUpstreamHost returns the host of a .clampdownrc upstream override so
+// the proxy's egress to it can be allowlisted. Returns "" when the upstream is
+// the built-in default (already covered by the agent's egress domains).
+func repointedUpstreamHost(route *agent.ProxyRoute, rcEnv map[string]string) string {
+	resolved := resolveProxyUpstream(route, rcEnv)
+	if resolved == route.Upstream {
+		return ""
+	}
+	u, err := url.Parse(resolved)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
 // ProxyConfig builds the container config for the auth proxy.
 // The route configuration and API key are passed as individual env vars.
 func ProxyConfig(
@@ -463,7 +585,7 @@ func ProxyConfig(
 
 	env := map[string]string{
 		"PROXY_PORT":          strconv.FormatUint(uint64(route.Port), 10),
-		"PROXY_UPSTREAM":      route.Upstream,
+		"PROXY_UPSTREAM":      resolveProxyUpstream(route, rcEnv),
 		"PROXY_HEADER_NAME":   route.HeaderName,
 		"PROXY_HEADER_PREFIX": route.HeaderPrefix,
 		"PROXY_KEY":           keyValue,

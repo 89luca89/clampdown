@@ -290,6 +290,7 @@ func (a *testAgent) Args(passthrough []string) []string                      { r
 func (a *testAgent) PromptFile() string                                      { return "" }
 func (a *testAgent) ProxyRoutes() []agent.ProxyRoute                         { return nil }
 func (a *testAgent) ProxyEnvOverride(_ []agent.ProxyRoute) map[string]string { return nil }
+func (a *testAgent) EnvAllowlist() agent.EnvAllow                            { return agent.EnvAllow{} }
 
 func TestBuild_ProtectionMounts(t *testing.T) {
 	workdir := t.TempDir()

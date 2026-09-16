@@ -81,6 +81,21 @@ func (c *Claude) ProxyRoutes() []ProxyRoute {
 
 func (c *Claude) ProxyEnvOverride(_ []ProxyRoute) map[string]string { return nil }
 
+// EnvAllowlist admits Claude Code configuration vars from .clampdownrc: the
+// ANTHROPIC_ and CLAUDE_ namespaces (the latter covers CLAUDE_CODE_), the
+// DISABLE_/ENABLE_ feature flags, and a few standalone limits. Telemetry
+// export (OTEL_) is intentionally excluded -- it egresses conversation data
+// and belongs behind a deliberate firewall opt-in, not an rc convenience.
+func (c *Claude) EnvAllowlist() EnvAllow {
+	return EnvAllow{
+		Prefixes: []string{"ANTHROPIC_", "CLAUDE_", "DISABLE_", "ENABLE_"},
+		Names: []string{
+			"BASH_MAX_OUTPUT_LENGTH", "MAX_THINKING_TOKENS", "MCP_TIMEOUT",
+			"TASK_MAX_OUTPUT_LENGTH", "USE_BUILTIN_RIPGREP", "FORCE_COLOR",
+		},
+	}
+}
+
 // EnsureClaudeOnboarding makes sure .claude.json has hasCompletedOnboarding: true.
 // Reads existing file if present, sets the key if missing, writes back.
 func EnsureClaudeOnboarding(homeDir string) {

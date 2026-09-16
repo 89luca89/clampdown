@@ -324,7 +324,19 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	// Build the full firewall ruleset now that the sidecar API is up.
 	// The entrypoint set a deny-all baseline; we add the agent allowlist
 	// and pod chains before any untrusted code starts.
-	allowEntries := agentAllowEntries(ag, opts.AgentAllow)
+	agentAllow := opts.AgentAllow
+	// A .clampdownrc upstream override repoints the proxy; the proxy shares
+	// this network namespace, so its new upstream host must be allowlisted.
+	if proxyRoute != nil {
+		host := repointedUpstreamHost(proxyRoute, rcEnv)
+		if host != "" {
+			if agentAllow != "" {
+				agentAllow += ","
+			}
+			agentAllow += host
+		}
+	}
+	allowEntries := agentAllowEntries(ag, agentAllow)
 	err = network.BuildAgentFirewall(ctx, rt, sidecarName, opts.AgentPolicy, allowEntries)
 	if err != nil {
 		rollback()
@@ -347,7 +359,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 			proxyName, sidecarName, sessionID, opts,
 			ag, proxyRoute, agentSeccomp, rcEnv,
 		)
-		slog.Info("starting auth proxy", "upstream", proxyRoute.Upstream)
+		slog.Info("starting auth proxy", "upstream", resolveProxyUpstream(proxyRoute, rcEnv))
 		err = rt.StartProxy(ctx, proxyCfg)
 		if err != nil {
 			rollback()
@@ -369,7 +381,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	agentCfg := agentConfig(
 		agentName, sidecarName, sessionID, opts,
 		ag, mnts, agentSeccomp,
-		p.Home, proxyRoute, allowEntries,
+		p.Home, proxyRoute, allowEntries, rcEnv,
 	)
 
 	slog.Info("starting agent", "name", ag.Name())

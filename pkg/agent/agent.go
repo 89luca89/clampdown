@@ -26,6 +26,30 @@ type ProxyRoute struct {
 	OAuth          bool
 }
 
+// EnvAllow declares which .clampdownrc variables may be injected into an
+// agent's container. A name is allowed if it equals an entry in Names or
+// starts with an entry in Prefixes. Credential- and endpoint-shaped names are
+// still stripped downstream even when a prefix admits them.
+type EnvAllow struct {
+	Prefixes []string
+	Names    []string
+}
+
+// Allows reports whether name is admitted by this allowlist.
+func (e EnvAllow) Allows(name string) bool {
+	for _, n := range e.Names {
+		if name == n {
+			return true
+		}
+	}
+	for _, p := range e.Prefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // Agent describes an AI tool that runs inside the sandbox.
 type Agent interface {
 	Name() string
@@ -38,6 +62,7 @@ type Agent interface {
 	PromptFile() string
 	ProxyRoutes() []ProxyRoute
 	ProxyEnvOverride(routes []ProxyRoute) map[string]string
+	EnvAllowlist() EnvAllow
 }
 
 // Mount describes a bind mount from host to container.
@@ -86,6 +111,28 @@ func Available() []string {
 	out := make([]string, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, a.Name())
+	}
+	return out
+}
+
+// ProxyManagedEnvNames returns the set of env var names the auth proxy owns
+// across all registered agents: provider API keys, their fallbacks, and
+// base-URL vars. The union spans every agent, not just the one running, so a
+// credential meant for another provider left in .clampdownrc is never injected
+// into the agent container.
+func ProxyManagedEnvNames() map[string]bool {
+	out := make(map[string]bool)
+	add := func(name string) {
+		if name != "" {
+			out[name] = true
+		}
+	}
+	for _, a := range agents {
+		for _, r := range a.ProxyRoutes() {
+			add(r.KeyEnv)
+			add(r.KeyEnvFallback)
+			add(r.BaseURLEnv)
+		}
 	}
 	return out
 }

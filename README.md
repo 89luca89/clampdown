@@ -176,8 +176,9 @@ upstream API directly (port 443 is allowed for infrastructure domains), it
 sends the dummy key `sk-proxy` and gets a 401.
 
 Keys are resolved from two sources -- the host environment and `.clampdownrc`.
-Neither is forwarded into the agent container. The proxy logs every API request
-(method, path, status, model, sizes, duration) for the audit trail.
+The resolved key is never forwarded into the agent container. The proxy logs
+every API request (method, path, status, model, sizes, duration) for the audit
+trail.
 
 ### Network isolation
 
@@ -558,22 +559,43 @@ Persistent defaults live in `$XDG_CONFIG_HOME/clampdown/config.json` (typically
 
 ### .clampdownrc
 
-`KEY=VALUE` files for API key configuration. Two locations are merged; project
-overrides global:
+`KEY=VALUE` files, merged from two locations (project overrides global):
 
 - `~/.config/clampdown/clampdownrc` -- global
 - `$workdir/.clampdownrc` -- per-project
 
-```sh
-# ~/.config/clampdown/clampdownrc
-ANTHROPIC_API_KEY=sk-ant-...
+Each entry is routed by name:
 
-# myproject/.clampdownrc
-ANTHROPIC_API_KEY=sk-ant-...   # project-specific key
+- **Provider API keys / auth tokens** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...)
+  go to the auth proxy only. The agent still receives the dummy `sk-proxy` key --
+  real credentials never enter the agent container.
+- **A base-URL var repoints the proxy's upstream**: `ANTHROPIC_BASE_URL` (or the
+  agent-agnostic `CLAMPDOWN_UPSTREAM`, for agents whose route declares no base-URL
+  var, such as Codex). The agent keeps talking to the local proxy; the proxy
+  forwards to the new upstream with the real key. The repointed host is added to
+  the agent egress allowlist automatically. Only `https` upstreams on port 443 are
+  reachable (proxy Landlock).
+- **Agent configuration vars** are injected into the agent container, overriding
+  the agent's built-in defaults, but only names on that agent's allowlist: for
+  Claude the `ANTHROPIC_`, `CLAUDE_`, `DISABLE_`, and `ENABLE_` namespaces plus a
+  few standalone limits; for OpenCode `OPENCODE_MODEL`; Codex takes none (it is
+  configured through its config file). Credential- and endpoint-shaped names
+  (`*_API_KEY`, `*_TOKEN`, `*_BASE_URL`, ...) and clampdown's own sandbox vars
+  (`SANDBOX_POLICY`, `HOME`, ...) are never injected.
+
+```sh
+# Drive the Claude agent with an OpenCode subscription:
+# ~/.config/clampdown/clampdownrc
+ANTHROPIC_API_KEY=<opencode-zen-key>            # -> proxy (real key)
+ANTHROPIC_BASE_URL=https://opencode.ai/zen/go   # -> proxy upstream
+ANTHROPIC_DEFAULT_OPUS_MODEL=minimax-m3         # -> agent
+ANTHROPIC_DEFAULT_SONNET_MODEL=minimax-m3       # -> agent
 ```
 
-Keys from `.clampdownrc` are passed to the auth proxy, not to the agent container.
-Lines starting with `#` are comments. Values may be quoted with `"` or `'`.
+Only allowlisted, non-credential vars reach the agent; anything else in
+`.clampdownrc` is read by the launcher but not forwarded to the agent
+container. Lines starting with `#` are comments. Values may be quoted with
+`"` or `'`.
 
 ---
 
