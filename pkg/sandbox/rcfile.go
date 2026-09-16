@@ -51,8 +51,11 @@ func ParseRC(path string) (map[string]string, error) {
 }
 
 // LoadRC reads $XDG_CONFIG_HOME/clampdown/clampdownrc (global) then
-// $workdir/.clampdownrc (project). Project values override global on conflict.
-func LoadRC(workdir string) (map[string]string, error) {
+// $workdir/.clampdownrc (project), with project overriding global on conflict.
+// If envFile is non-empty it names an explicit rc file (any path, any
+// extension) merged last, winning over both -- and, unlike the two optional
+// files, it must exist.
+func LoadRC(workdir, envFile string) (map[string]string, error) {
 	global, err := ParseRC(filepath.Join(ConfigDir, "clampdownrc"))
 	if err != nil {
 		return nil, err
@@ -62,5 +65,19 @@ func LoadRC(workdir string) (map[string]string, error) {
 		return nil, err
 	}
 	maps.Copy(global, project)
+
+	if envFile != "" {
+		// A named rc file must exist; a missing path is a user typo, not the
+		// optional absence ParseRC tolerates for the global/project files.
+		_, err = os.Stat(envFile)
+		if err != nil {
+			return nil, fmt.Errorf("clampdownrc %s: %w", envFile, err)
+		}
+		explicit, err := ParseRC(envFile)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(global, explicit)
+	}
 	return global, nil
 }

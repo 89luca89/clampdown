@@ -43,6 +43,7 @@ type Options struct {
 	AppendSystemPrompt string
 	CPUs               int
 	EnableTripwire     bool
+	EnvFile            string
 	GH                 bool
 	MaskPaths          []string
 	GitConfig          bool
@@ -126,7 +127,7 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 		return "", err
 	}
 
-	rcEnv, err := LoadRC(opts.Workdir)
+	rcEnv, err := LoadRC(opts.Workdir, opts.EnvFile)
 	if err != nil {
 		return "", fmt.Errorf(".clampdownrc: %w", err)
 	}

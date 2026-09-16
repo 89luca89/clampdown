@@ -152,7 +152,7 @@ func TestLoadRC_GlobalOnly(t *testing.T) {
 
 	os.WriteFile(filepath.Join(configDir, "clampdownrc"), []byte("G=1\n"), 0o600)
 
-	m, err := sandbox.LoadRC(t.TempDir())
+	m, err := sandbox.LoadRC(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestLoadRC_ProjectOnly(t *testing.T) {
 	workdir := t.TempDir()
 	os.WriteFile(filepath.Join(workdir, ".clampdownrc"), []byte("P=2\n"), 0o600)
 
-	m, err := sandbox.LoadRC(workdir)
+	m, err := sandbox.LoadRC(workdir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestLoadRC_ProjectOverridesGlobal(t *testing.T) {
 	os.WriteFile(filepath.Join(configDir, "clampdownrc"), []byte("KEY=global\nONLY_G=g\n"), 0o600)
 	os.WriteFile(filepath.Join(workdir, ".clampdownrc"), []byte("KEY=project\nONLY_P=p\n"), 0o600)
 
-	m, err := sandbox.LoadRC(workdir)
+	m, err := sandbox.LoadRC(workdir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +208,47 @@ func TestLoadRC_Neither(t *testing.T) {
 	sandbox.ConfigDir = t.TempDir()
 	defer func() { sandbox.ConfigDir = orig }()
 
-	m, err := sandbox.LoadRC(t.TempDir())
+	m, err := sandbox.LoadRC(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(m) != 0 {
 		t.Errorf("expected empty map, got %v", m)
+	}
+}
+
+func TestLoadRC_EnvFileWins(t *testing.T) {
+	configDir := t.TempDir()
+	orig := sandbox.ConfigDir
+	sandbox.ConfigDir = configDir
+	defer func() { sandbox.ConfigDir = orig }()
+
+	workdir := t.TempDir()
+	os.WriteFile(filepath.Join(configDir, "clampdownrc"), []byte("K=global\nONLY_G=g\n"), 0o600)
+	os.WriteFile(filepath.Join(workdir, ".clampdownrc"), []byte("K=project\n"), 0o600)
+
+	envFile := filepath.Join(t.TempDir(), "custom.rc")
+	os.WriteFile(envFile, []byte("K=envfile\n"), 0o600)
+
+	m, err := sandbox.LoadRC(workdir, envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["K"] != "envfile" {
+		t.Errorf("K = %q, want envfile", m["K"])
+	}
+	if m["ONLY_G"] != "g" {
+		t.Errorf("global entry should survive under env-file override, got %v", m)
+	}
+}
+
+func TestLoadRC_EnvFileMissing(t *testing.T) {
+	orig := sandbox.ConfigDir
+	sandbox.ConfigDir = t.TempDir()
+	defer func() { sandbox.ConfigDir = orig }()
+
+	_, err := sandbox.LoadRC(t.TempDir(), "/nonexistent/custom.rc")
+	if err == nil {
+		t.Fatal("expected error for a named-but-missing env-file")
 	}
 }

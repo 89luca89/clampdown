@@ -404,6 +404,7 @@ Credentials are opt-in. Nothing is forwarded by default.
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
 | `--append-system-prompt` | -- | Append text to clampdown's injected system prompt (all agents) |
 | `--append-system-prompt-file` | -- | Append a host file's contents to clampdown's injected system prompt |
+| `--env-file` | -- | Load a specific clampdownrc file last, overriding project and global (any filename); also `SANDBOX_ENV_FILE` |
 
 **Tripwire** monitors protected host paths via inotify and kills the session
 immediately if any are modified -- the last line of defense against a full
@@ -559,10 +560,11 @@ Persistent defaults live in `$XDG_CONFIG_HOME/clampdown/config.json` (typically
 
 ### .clampdownrc
 
-`KEY=VALUE` files, merged from two locations (project overrides global):
+`KEY=VALUE` files, merged from up to three sources, each overriding the previous:
 
 - `~/.config/clampdown/clampdownrc` -- global
 - `$workdir/.clampdownrc` -- per-project
+- the file named by `--env-file` (any path or extension), if given -- highest precedence
 
 Each entry is routed by name:
 

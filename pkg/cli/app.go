@@ -138,6 +138,11 @@ func Run(args []string) error {
 				Aliases: []string{"w"},
 				Usage:   "Directory to work into",
 			},
+			&ucli.StringFlag{
+				Name:    "env-file",
+				Sources: ucli.EnvVars("SANDBOX_ENV_FILE"),
+				Usage:   "Path to a clampdownrc file loaded last, overriding the project and global rc (any filename)",
+			},
 			&ucli.BoolFlag{
 				Name:  "gitconfig",
 				Value: cfg.GitConfig,
@@ -369,6 +374,7 @@ func runAgent(agName string, cfg Config) ucli.ActionFunc {
 			AppendSystemPrompt: appendPrompt,
 			CPUs:               cmd.Int("cpus"),
 			EnableTripwire:     cmd.Bool("tripwire"),
+			EnvFile:            cmd.String("env-file"),
 			GH:                 cmd.Bool("gh"),
 			GitConfig:          cmd.Bool("gitconfig"),
 			MaskPaths:          append(cfg.MaskPaths, cmd.StringSlice("mask")...),
