@@ -12,6 +12,11 @@ CODEX_IMAGE    := clampdown-codex:latest
 OPENCODE_IMAGE := clampdown-opencode:latest
 PROXY_IMAGE    := clampdown-proxy:latest
 
+# Pattern-rule aliases for the agent image variables above.
+IMAGE_claude   := $(CLAUDE_IMAGE)
+IMAGE_codex    := $(CODEX_IMAGE)
+IMAGE_opencode := $(OPENCODE_IMAGE)
+
 # Go binary sources
 SEAL_SRCS       := container-images/sidecar/seal/seal.go container-images/sidecar/seal/go.mod container-images/sidecar/seal/go.sum
 ENTRYPOINT_SRCS := container-images/sidecar/entrypoint/entrypoint.go container-images/sidecar/entrypoint/bootstrap.go container-images/sidecar/entrypoint/protect.go container-images/sidecar/entrypoint/filter.go container-images/sidecar/entrypoint/supervisor.go container-images/sidecar/entrypoint/handlers.go container-images/sidecar/entrypoint/execallow.go container-images/sidecar/entrypoint/go.mod container-images/sidecar/entrypoint/go.sum
@@ -106,16 +111,11 @@ binaries: $(SIDECAR_BINS) container-images/proxy/auth-proxy launcher
 	$(CTR) build --build-arg TARGETARCH=$(GOARCH) --build-arg PODMAN_VERSION="$(PODMAN_VERSION)" -f container-images/sidecar/Containerfile -t $(SIDECAR_IMAGE) container-images/sidecar/
 	@touch $@
 
-.claude.stamp: container-images/sidecar/seal/sandbox-seal $(CLAUDE_SRCS)
-	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/claude/Containerfile -t $(CLAUDE_IMAGE) container-images/
-	@touch $@
-
-.codex.stamp: container-images/sidecar/seal/sandbox-seal $(CODEX_SRCS)
-	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/codex/Containerfile -t $(CODEX_IMAGE) container-images/
-	@touch $@
-
-.opencode.stamp: container-images/sidecar/seal/sandbox-seal $(OPENCODE_SRCS)
-	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/opencode/Containerfile -t $(OPENCODE_IMAGE) container-images/
+# One pattern rule per agent image: the target name selects the container
+# directory; the tag comes from IMAGE_<target>, which aliases the agent image
+# variables above, so a build and the dev config cannot disagree.
+.%.stamp: container-images/sidecar/seal/sandbox-seal container-images/%/Containerfile $(HELPERS_SRC) $(NETWORK_HELPER)
+	$(CTR) build --build-arg TARGETARCH=$(GOARCH) -f container-images/$*/Containerfile -t $(IMAGE_$*) container-images/
 	@touch $@
 
 .proxy.stamp: container-images/proxy/auth-proxy container-images/sidecar/seal/sandbox-seal container-images/proxy/Containerfile
