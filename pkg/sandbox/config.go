@@ -462,6 +462,12 @@ func injectableRCEnv(ag agent.Agent, rcEnv map[string]string) map[string]string 
 	proxyManaged := agent.ProxyManagedEnvNames()
 	out := make(map[string]string, len(rcEnv))
 	for k, v := range rcEnv {
+		// An empty entry is an unset instruction, not a value to forward: a
+		// present but blank variable reads as set to tools that check for
+		// presence.
+		if v == "" {
+			continue
+		}
 		if !allow.Allows(k) {
 			continue
 		}

@@ -203,6 +203,35 @@ func TestLoadRC_ProjectOverridesGlobal(t *testing.T) {
 	}
 }
 
+// An empty value is a cancellation marker, not a deletion: the launcher needs
+// to tell "unset here" from "never mentioned" to keep a host environment
+// variable of the same name out. Nothing empty is forwarded to a container.
+func TestLoadRC_EmptyValueStaysUnset(t *testing.T) {
+	configDir := t.TempDir()
+	orig := sandbox.ConfigDir
+	sandbox.ConfigDir = configDir
+	defer func() { sandbox.ConfigDir = orig }()
+
+	workdir := t.TempDir()
+	os.WriteFile(filepath.Join(configDir, "clampdownrc"), []byte("ANTHROPIC_API_KEY=sk-global\nOPENCODE_API_KEY=sk-rc\n"), 0o600)
+	os.WriteFile(filepath.Join(workdir, ".clampdownrc"), []byte("ANTHROPIC_API_KEY=\n"), 0o600)
+
+	m, err := sandbox.LoadRC(workdir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := m["ANTHROPIC_API_KEY"]
+	if !ok {
+		t.Fatal("empty entry dropped: a host variable of the same name would resolve again")
+	}
+	if v != "" {
+		t.Errorf("ANTHROPIC_API_KEY = %q, want empty", v)
+	}
+	if m["OPENCODE_API_KEY"] != "sk-rc" {
+		t.Errorf("OPENCODE_API_KEY = %q, want sk-rc", m["OPENCODE_API_KEY"])
+	}
+}
+
 func TestLoadRC_Neither(t *testing.T) {
 	orig := sandbox.ConfigDir
 	sandbox.ConfigDir = t.TempDir()

@@ -657,6 +657,22 @@ Only allowlisted, non-credential vars reach the agent; anything else in
 container. Lines starting with `#` are comments. Values may be quoted with
 `"` or `'`.
 
+An empty value unsets the variable: it is never forwarded to a container, and it
+also cancels a host environment variable of the same name. That is how a
+per-run file turns a provider off without editing the broad one, and it is what
+decides the session's provider, since the first route whose key resolves is the
+one the proxy serves:
+
+```sh
+# ~/.config/clampdown/pi.rc
+ANTHROPIC_API_KEY=                              # not this route
+                                                # OPENCODE_API_KEY comes from the global rc
+```
+
+```sh
+clampdown pi --env-file ~/.config/clampdown/pi.rc
+```
+
 ---
 
 ## Building from source

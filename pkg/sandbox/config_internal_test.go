@@ -61,6 +61,7 @@ func TestInjectableRCEnv(t *testing.T) {
 	for _, excluded := range []string{
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
 		"OPENAI_API_KEY", "SANDBOX_POLICY", "HOME", "CLAMPDOWN_UPSTREAM", "FOO",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL",
 	} {
 		if _, ok := got[excluded]; ok {
 			t.Errorf("%q should be excluded from agent injection", excluded)
