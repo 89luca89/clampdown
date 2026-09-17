@@ -514,20 +514,27 @@ func hostTerminalEnv() map[string]string {
 }
 
 // ActiveProxyRoute returns the first proxy route whose key is set on the
-// host or in rcEnv.
+// host or in rcEnv and whose upstream can be built.
 func ActiveProxyRoute(ag agent.Agent, rcEnv map[string]string) *agent.ProxyRoute {
 	for _, r := range ag.ProxyRoutes() {
 		_, ok := resolveKey(r.KeyEnv, rcEnv)
-		if ok {
-			return &r
-		}
-		if r.KeyEnvFallback != "" {
+		if !ok {
 			_, ok = resolveKey(r.KeyEnvFallback, rcEnv)
 			if ok {
 				r.KeyEnv, r.KeyEnvFallback = r.KeyEnvFallback, r.KeyEnv
-				return &r
 			}
 		}
+		if !ok {
+			continue
+		}
+		// A route that needs a region or account id the environment does not
+		// provide would start a proxy that forwards nowhere.
+		if resolveProxyUpstream(&r, rcEnv) == "" {
+			slog.Warn("proxy route has an unresolvable upstream, skipping",
+				"provider", r.ProviderID, "key", r.KeyEnv, "needs", r.UpstreamEnv)
+			continue
+		}
+		return &r
 	}
 	return nil
 }
@@ -536,13 +543,16 @@ func ActiveProxyRoute(ag agent.Agent, rcEnv map[string]string) *agent.ProxyRoute
 // var in .clampdownrc repoints it: the active route's BaseURLEnv (e.g.
 // ANTHROPIC_BASE_URL) when the route declares one, or the agent-agnostic
 // CLAMPDOWN_UPSTREAM fallback for routes without a BaseURLEnv (e.g. Codex and
-// OpenCode's provider-id routes). The built-in route.Upstream is used when
-// neither is set or the override is not a valid https URL.
+// OpenCode's provider-id routes). Routes whose endpoint embeds a region or
+// account id derive it from UpstreamEnv. The built-in route.Upstream is used
+// when none applies or the override is not a valid https URL.
 func resolveProxyUpstream(route *agent.ProxyRoute, rcEnv map[string]string) string {
 	override := ""
 	if route.BaseURLEnv != "" && rcEnv[route.BaseURLEnv] != "" {
 		override = rcEnv[route.BaseURLEnv]
 	} else if v := rcEnv[upstreamOverrideEnv]; v != "" {
+		override = v
+	} else if v, ok := resolveUpstreamEnv(route, rcEnv); ok {
 		override = v
 	}
 	if override == "" {
@@ -556,6 +566,23 @@ func resolveProxyUpstream(route *agent.ProxyRoute, rcEnv map[string]string) stri
 		return route.Upstream
 	}
 	return override
+}
+
+// resolveUpstreamEnv expands a route's UpstreamEnv into an upstream URL. The
+// value is read from the host environment or .clampdownrc, whichever is set,
+// letting a regional or account-scoped endpoint be built without hardcoding it.
+func resolveUpstreamEnv(route *agent.ProxyRoute, rcEnv map[string]string) (string, bool) {
+	if route.UpstreamEnv == "" {
+		return "", false
+	}
+	value, ok := resolveKey(route.UpstreamEnv, rcEnv)
+	if !ok {
+		return "", false
+	}
+	if route.UpstreamTemplate == "" {
+		return value, true
+	}
+	return fmt.Sprintf(route.UpstreamTemplate, value), true
 }
 
 // repointedUpstreamHost returns the host of a .clampdownrc upstream override so

@@ -3,23 +3,45 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/89luca89/clampdown/pkg/agent"
 )
 
+// unsetEnv removes names from the process environment for the duration of the
+// test. Blanking a variable is not the same thing: an exported but empty
+// variable is itself an unset instruction, so a test that wants an rc value to
+// win has to take the name out of the environment.
+func unsetEnv(t *testing.T, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		prev, had := os.LookupEnv(name)
+		os.Unsetenv(name)
+		t.Cleanup(func() {
+			if had {
+				os.Setenv(name, prev)
+			} else {
+				os.Unsetenv(name)
+			}
+		})
+	}
+}
+
 func TestInjectableRCEnv(t *testing.T) {
 	rcEnv := map[string]string{
-		"ANTHROPIC_API_KEY":            "sk-real",     // proxy key -> excluded
-		"ANTHROPIC_BASE_URL":           "https://x",   // base-url -> excluded
-		"ANTHROPIC_AUTH_TOKEN":         "tok",         // credential-shaped in allowed prefix -> excluded
-		"OPENAI_API_KEY":               "sk-other",    // not in Claude allowlist -> excluded
-		"SANDBOX_POLICY":               "{}",          // infra, no allowlist match -> excluded
-		"HOME":                         "/evil",       // infra -> excluded
-		"CLAMPDOWN_UPSTREAM":           "https://ctl", // control var, not allowlisted -> excluded
-		"FOO":                          "bar",         // not allowlisted -> excluded
-		"ANTHROPIC_DEFAULT_OPUS_MODEL": "minimax-m3",  // allowed prefix -> injected
-		"DISABLE_TELEMETRY":            "1",           // allowed prefix -> injected
+		"ANTHROPIC_API_KEY":             "sk-real",     // proxy key -> excluded
+		"ANTHROPIC_BASE_URL":            "https://x",   // base-url -> excluded
+		"ANTHROPIC_AUTH_TOKEN":          "tok",         // credential-shaped in allowed prefix -> excluded
+		"OPENAI_API_KEY":                "sk-other",    // not in Claude allowlist -> excluded
+		"SANDBOX_POLICY":                "{}",          // infra, no allowlist match -> excluded
+		"HOME":                          "/evil",       // infra -> excluded
+		"CLAMPDOWN_UPSTREAM":            "https://ctl", // control var, not allowlisted -> excluded
+		"FOO":                           "bar",         // not allowlisted -> excluded
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":  "minimax-m3",  // allowed prefix -> injected
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "",            // allowed, but empty -> unset, not forwarded
+		"DISABLE_TELEMETRY":             "1",           // allowed prefix -> injected
 	}
 
 	got := injectableRCEnv(&agent.Claude{}, rcEnv)
@@ -128,6 +150,48 @@ func TestResolveProxyUpstream(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := resolveProxyUpstream(tt.route, tt.rcEnv)
+		if got != tt.want {
+			t.Errorf("%s: resolveProxyUpstream = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Routes whose endpoint embeds a region or account id build it from
+// UpstreamEnv at resolve time instead of hardcoding it.
+func TestResolveProxyUpstreamFromEnv(t *testing.T) {
+	cloudflare := &agent.ProxyRoute{
+		KeyEnv: "CLOUDFLARE_API_KEY", HeaderName: "Authorization",
+		UpstreamEnv:      "CLOUDFLARE_ACCOUNT_ID",
+		UpstreamTemplate: "https://api.cloudflare.com/client/v4/accounts/%s/ai/v1",
+	}
+	azure := &agent.ProxyRoute{
+		KeyEnv: "AZURE_OPENAI_API_KEY", HeaderName: "api-key",
+		UpstreamEnv: "AZURE_OPENAI_BASE_URL",
+	}
+
+	tests := []struct {
+		name  string
+		route *agent.ProxyRoute
+		env   map[string]string
+		want  string
+	}{
+		{"template expands the account id", cloudflare,
+			map[string]string{"CLOUDFLARE_ACCOUNT_ID": "abc123"},
+			"https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1"},
+		{"template without the value stays unresolved", cloudflare, nil, ""},
+		{"no template: the value is the url", azure,
+			map[string]string{"AZURE_OPENAI_BASE_URL": "https://res.openai.azure.com/openai/deployments/dep"},
+			"https://res.openai.azure.com/openai/deployments/dep"},
+		{"endpoint without the value stays unresolved", azure, nil, ""},
+		// The account id is path material: it cannot move the request to
+		// another host, only address another resource on Cloudflare's.
+		{"account id stays in the path", cloudflare,
+			map[string]string{"CLOUDFLARE_ACCOUNT_ID": "evil.com/x"},
+			"https://api.cloudflare.com/client/v4/accounts/evil.com/x/ai/v1"},
+	}
+	for _, tt := range tests {
+		unsetEnv(t, "CLOUDFLARE_ACCOUNT_ID", "AZURE_OPENAI_BASE_URL")
+		got := resolveProxyUpstream(tt.route, tt.env)
 		if got != tt.want {
 			t.Errorf("%s: resolveProxyUpstream = %q, want %q", tt.name, got, tt.want)
 		}
