@@ -16,6 +16,7 @@ future
 .claude
 .codex
 .cache
+.pi
 .home
 .*.stamp
 *.log
