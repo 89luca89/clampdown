@@ -100,6 +100,7 @@ var agents = []Agent{
 	&Claude{},
 	&Codex{},
 	&OpenCode{},
+	&Pi{},
 }
 
 // Get returns the agent registered under name.

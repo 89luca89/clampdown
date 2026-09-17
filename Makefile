@@ -10,12 +10,14 @@ SIDECAR_IMAGE  := clampdown-sidecar:latest
 CLAUDE_IMAGE   := clampdown-claude:latest
 CODEX_IMAGE    := clampdown-codex:latest
 OPENCODE_IMAGE := clampdown-opencode:latest
+PI_IMAGE       := clampdown-pi:latest
 PROXY_IMAGE    := clampdown-proxy:latest
 
 # Pattern-rule aliases for the agent image variables above.
 IMAGE_claude   := $(CLAUDE_IMAGE)
 IMAGE_codex    := $(CODEX_IMAGE)
 IMAGE_opencode := $(OPENCODE_IMAGE)
+IMAGE_pi       := $(PI_IMAGE)
 
 # Go binary sources
 SEAL_SRCS       := container-images/sidecar/seal/seal.go container-images/sidecar/seal/go.mod container-images/sidecar/seal/go.sum
@@ -47,13 +49,14 @@ NETWORK_HELPER    := container-images/helpers/sandbox_network_helper.c
 CLAUDE_SRCS       := container-images/claude/Containerfile $(HELPERS_SRC) $(NETWORK_HELPER)
 CODEX_SRCS        := container-images/codex/Containerfile $(HELPERS_SRC) $(NETWORK_HELPER)
 OPENCODE_SRCS     := container-images/opencode/Containerfile $(HELPERS_SRC) $(NETWORK_HELPER)
+PI_SRCS           := container-images/pi/Containerfile $(HELPERS_SRC) $(NETWORK_HELPER)
 
 .PHONY: all binaries test test-integration lint \
-	seal sidecar claude codex opencode proxy launcher install clean \
-	push-sidecar push-claude push-codex push-opencode push-proxy push-images \
+	seal sidecar claude codex opencode pi proxy launcher install clean \
+	push-sidecar push-claude push-codex push-opencode push-pi push-proxy push-images \
 	manifest save-images dev undev audit-escape audit-project
 
-all: .sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .proxy.stamp launcher
+all: .sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .pi.stamp .proxy.stamp launcher
 
 lint:
 	# Avoid if x := foo; condition() type of expressions
@@ -157,6 +160,14 @@ push-opencode: container-images/sidecar/seal/sandbox-seal $(OPENCODE_SRCS)
 		container-images/
 	$(CTR) push $(REGISTRY)/clampdown-opencode:$(TAG)-$(GOARCH)
 
+push-pi: container-images/sidecar/seal/sandbox-seal $(PI_SRCS)
+	$(CTR) build \
+		--platform $(PLATFORM) \
+		-t $(REGISTRY)/clampdown-pi:$(TAG)-$(GOARCH) \
+		-f container-images/pi/Containerfile \
+		container-images/
+	$(CTR) push $(REGISTRY)/clampdown-pi:$(TAG)-$(GOARCH)
+
 push-proxy: container-images/proxy/auth-proxy container-images/sidecar/seal/sandbox-seal container-images/proxy/Containerfile
 	$(CTR) build \
 		--platform $(PLATFORM) \
@@ -165,12 +176,12 @@ push-proxy: container-images/proxy/auth-proxy container-images/sidecar/seal/sand
 		container-images/
 	$(CTR) push $(REGISTRY)/clampdown-proxy:$(TAG)-$(GOARCH)
 
-push-images: push-sidecar push-claude push-codex push-opencode push-proxy
+push-images: push-sidecar push-claude push-codex push-opencode push-pi push-proxy
 
 # Merge per-arch images into a multi-arch manifest at :$(TAG) and :latest.
 # Requires docker 20.10+ or podman 4+.
 manifest:
-	@for img in sidecar claude codex opencode proxy; do \
+	@for img in sidecar claude codex opencode pi proxy; do \
 		$(CTR) manifest create \
 			$(REGISTRY)/clampdown-$$img:$(TAG) \
 			$(REGISTRY)/clampdown-$$img:$(TAG)-amd64 \
@@ -185,7 +196,7 @@ manifest:
 
 # Pull the per-arch images and export each as a compressed tar archive.
 save-images:
-	@for img in sidecar claude codex opencode proxy; do \
+	@for img in sidecar claude codex opencode pi proxy; do \
 		$(CTR) pull --platform $(PLATFORM) $(REGISTRY)/clampdown-$$img:$(TAG)-$(GOARCH); \
 		$(CTR) save $(REGISTRY)/clampdown-$$img:$(TAG)-$(GOARCH) | gzip > clampdown-$$img-$(GOARCH).tar.gz; \
 	done
@@ -197,6 +208,7 @@ sidecar: .sidecar.stamp
 claude: .claude.stamp
 codex: .codex.stamp
 opencode: .opencode.stamp
+pi: .pi.stamp
 proxy: .proxy.stamp
 
 launcher:
@@ -212,11 +224,11 @@ dev: all install
 	@mkdir -p "$(CONFIG_DIR)"
 	@if [ -f "$(CONFIG_FILE)" ]; then \
 		tmp=$$(mktemp); \
-		jq '. + {"sidecar_image":"$(SIDECAR_IMAGE)","proxy_image":"$(PROXY_IMAGE)","agent_images":{"claude":"$(CLAUDE_IMAGE)","codex":"$(CODEX_IMAGE)","opencode":"$(OPENCODE_IMAGE)"}}' \
+		jq '. + {"sidecar_image":"$(SIDECAR_IMAGE)","proxy_image":"$(PROXY_IMAGE)","agent_images":{"claude":"$(CLAUDE_IMAGE)","codex":"$(CODEX_IMAGE)","opencode":"$(OPENCODE_IMAGE)","pi":"$(PI_IMAGE)"}}' \
 			"$(CONFIG_FILE)" > "$$tmp" && mv "$$tmp" "$(CONFIG_FILE)"; \
 	else \
-		printf '{"sidecar_image":"%s","proxy_image":"%s","agent_images":{"claude":"%s","codex":"%s","opencode":"%s"}}\n' \
-			"$(SIDECAR_IMAGE)" "$(PROXY_IMAGE)" "$(CLAUDE_IMAGE)" "$(CODEX_IMAGE)" "$(OPENCODE_IMAGE)" > "$(CONFIG_FILE)"; \
+		printf '{"sidecar_image":"%s","proxy_image":"%s","agent_images":{"claude":"%s","codex":"%s","opencode":"%s","pi":"%s"}}\n' \
+			"$(SIDECAR_IMAGE)" "$(PROXY_IMAGE)" "$(CLAUDE_IMAGE)" "$(CODEX_IMAGE)" "$(OPENCODE_IMAGE)" "$(PI_IMAGE)" > "$(CONFIG_FILE)"; \
 	fi
 	@echo "config: $(CONFIG_FILE)"
 	@echo "  sidecar_image:          $(SIDECAR_IMAGE)"
@@ -224,6 +236,7 @@ dev: all install
 	@echo "  agent_images.claude:    $(CLAUDE_IMAGE)"
 	@echo "  agent_images.codex:     $(CODEX_IMAGE)"
 	@echo "  agent_images.opencode:  $(OPENCODE_IMAGE)"
+	@echo "  agent_images.pi:        $(PI_IMAGE)"
 
 # Remove local image overrides from config.json.
 undev:
@@ -238,7 +251,7 @@ undev:
 
 clean:
 	rm -f clampdown \
-		.sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .proxy.stamp \
+		.sidecar.stamp .claude.stamp .codex.stamp .opencode.stamp .pi.stamp .proxy.stamp \
 		container-images/sidecar/podman-linux-$(GOARCH).tar.gz \
 		container-images/sidecar/seal/sandbox-seal \
 		container-images/sidecar/entrypoint/entrypoint \
@@ -250,6 +263,7 @@ clean:
 	$(CTR) rmi $(CLAUDE_IMAGE) 2>/dev/null || true
 	$(CTR) rmi $(CODEX_IMAGE) 2>/dev/null || true
 	$(CTR) rmi $(OPENCODE_IMAGE) 2>/dev/null || true
+	$(CTR) rmi $(PI_IMAGE) 2>/dev/null || true
 	$(CTR) rmi $(PROXY_IMAGE) 2>/dev/null || true
 
 # --- Security Audit ---

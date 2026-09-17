@@ -198,6 +198,126 @@ func TestResolveProxyUpstreamFromEnv(t *testing.T) {
 	}
 }
 
+// An empty value is an unset instruction on both sides of the lookup: an empty
+// rc entry cancels a key exported in the shell, and a shell variable exported
+// blank cancels an rc entry. Anything else keeps the environment ahead of the
+// rc file.
+func TestResolveKeyEmptyMasksBothWays(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		envSet   bool
+		rcEnv    map[string]string
+		want     string
+		wantOK   bool
+	}{
+		{"rc value alone", "", false,
+			map[string]string{"K": "sk-rc"}, "sk-rc", true},
+		{"environment wins over rc", "sk-env", true,
+			map[string]string{"K": "sk-rc"}, "sk-env", true},
+		{"empty rc entry cancels the environment", "sk-env", true,
+			map[string]string{"K": ""}, "", false},
+		{"empty environment cancels the rc entry", "", true,
+			map[string]string{"K": "sk-rc"}, "", false},
+		{"neither source sets it", "", false,
+			map[string]string{}, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetEnv(t, "K")
+			if tt.envSet {
+				t.Setenv("K", tt.envValue)
+			}
+
+			value, ok := resolveKey("K", tt.rcEnv)
+			if ok != tt.wantOK || value != tt.want {
+				t.Errorf("resolveKey = (%q, %v), want (%q, %v)", value, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+// anthropic sits first in pi's route table, so a key exported in the shell
+// takes the session away from the provider the rc file asks for unless the rc
+// entry set to empty wins.
+func TestActiveProxyRouteEmptyRCKeyMasksHostEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-host")
+	rcEnv := map[string]string{
+		"ANTHROPIC_API_KEY": "",
+		"OPENCODE_API_KEY":  "sk-rc",
+	}
+
+	route := ActiveProxyRoute(&agent.Pi{}, rcEnv)
+	if route == nil {
+		t.Fatal("no active route")
+	}
+	if route.ProviderID != "opencode-go" {
+		t.Errorf("active provider = %q, want opencode-go", route.ProviderID)
+	}
+}
+
+// The whole decision path, from the files on disk to the route: a global rc
+// that sets the anthropic key, a project rc that cancels it and sets the
+// opencode one, and a shell that exports the anthropic key anyway.
+func TestRCEmptyKeyFlipsRouteWithHostEnvSet(t *testing.T) {
+	configDir := t.TempDir()
+	orig := ConfigDir
+	ConfigDir = configDir
+	defer func() { ConfigDir = orig }()
+
+	workdir := t.TempDir()
+	os.WriteFile(filepath.Join(configDir, "clampdownrc"),
+		[]byte("ANTHROPIC_API_KEY=sk-global\nANTHROPIC_BASE_URL=https://opencode.ai/zen/go\n"), 0o600)
+	os.WriteFile(filepath.Join(workdir, ".clampdownrc"),
+		[]byte("ANTHROPIC_API_KEY=\nOPENCODE_API_KEY=sk-opencode\n"), 0o600)
+
+	unsetEnv(t, "OPENCODE_API_KEY")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-host")
+
+	rcEnv, err := LoadRC(workdir, "")
+	if err != nil {
+		t.Fatalf("LoadRC: %v", err)
+	}
+	route := ActiveProxyRoute(&agent.Pi{}, rcEnv)
+	if route == nil {
+		t.Fatal("no active route")
+	}
+	if route.ProviderID != "opencode-go" {
+		t.Errorf("active provider = %q, want opencode-go", route.ProviderID)
+	}
+	if got := resolveProxyUpstream(route, rcEnv); got != "https://opencode.ai/zen/go/v1" {
+		t.Errorf("proxy upstream = %q", got)
+	}
+}
+
+// A route that cannot assemble its upstream must not activate: the proxy would
+// start and forward requests nowhere.
+func TestActiveProxyRouteRequiresUpstream(t *testing.T) {
+	pi := &agent.Pi{}
+	for _, r := range pi.ProxyRoutes() {
+		unsetEnv(t, r.KeyEnv)
+		if r.KeyEnvFallback != "" {
+			unsetEnv(t, r.KeyEnvFallback)
+		}
+	}
+
+	azure := map[string]string{"AZURE_OPENAI_API_KEY": "k"}
+	if route := ActiveProxyRoute(pi, azure); route != nil {
+		t.Fatalf("route without an upstream should stay inactive, got %+v", route)
+	}
+
+	azure["AZURE_OPENAI_BASE_URL"] = "https://res.openai.azure.com/openai/deployments/dep"
+	route := ActiveProxyRoute(pi, azure)
+	if route == nil || route.ProviderID != "azure-openai-responses" {
+		t.Fatalf("route with an upstream should activate, got %+v", route)
+	}
+	// The endpoint is per-resource, so its host must reach the egress allowlist.
+	if host := repointedUpstreamHost(route, azure); host != "res.openai.azure.com" {
+		t.Errorf("egress host = %q, want res.openai.azure.com", host)
+	}
+}
+
 func TestRepointedUpstreamHost(t *testing.T) {
 	claude := &agent.ProxyRoute{
 		Upstream: "https://api.anthropic.com", KeyEnv: "ANTHROPIC_API_KEY",

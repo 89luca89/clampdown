@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Install the pinned pi coding agent from the npm package.
+FROM alpine:3.23 AS builder
+
+# Pin pi version — update deliberately after testing.
+# --ignore-scripts: no postinstall code runs at build time.
+ARG PI_VERSION=0.85.1
+RUN apk add --no-cache nodejs npm \
+    && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+    && npm cache clean --force \
+    && rm -rf /root/.npm
+
+# podman-remote for container operations inside the sandbox.
+FROM alpine:3.23 AS podman
+RUN apk add --no-cache podman-remote
+
+# Network guidance helper — LD_PRELOAD .so for connect() firewall messages.
+FROM alpine:3.23 AS sandbox-network-helper
+RUN apk add --no-cache gcc musl-dev
+COPY helpers/sandbox_network_helper.c /build/
+RUN gcc -shared -fPIC -Os -s -o /sandbox_network_helper.so /build/sandbox_network_helper.c
+
+# Docker Compose standalone binary.
+# Pinned to v2.32.4 — last version confirmed working with podman compat API v1.41.
+# docker compose v2.29+ may require API v1.44+; test before bumping.
+FROM alpine:3.23 AS compose
+ARG TARGETARCH
+ARG COMPOSE_VERSION=v2.32.4
+RUN wget -qO /docker-compose \
+    "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" \
+    && chmod +x /docker-compose
+
+FROM alpine:3.23
+
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY sidecar/seal/sandbox-seal /usr/local/bin/sandbox-seal
+COPY helpers/sandbox_command_helper.sh /etc/sandbox_command_helper.sh
+COPY --from=sandbox-network-helper /sandbox_network_helper.so /usr/local/lib/sandbox_network_helper.so
+COPY --from=podman /usr/bin/podman-remote /usr/bin/podman-remote
+COPY --from=compose /docker-compose /usr/local/bin/docker-compose
+
+# ripgrep and fd back pi's grep and find tools: shipping them means the agent
+# never depends on pi fetching its own managed copies at runtime.
+RUN apk add --no-cache \
+    nodejs npm bash coreutils ripgrep fd jq ca-certificates \
+    && ln -s ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /usr/local/bin/pi \
+    && ln -s podman-remote /usr/bin/podman \
+    && ln -s podman-remote /usr/bin/docker
+
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/sandbox_command_helper.sh
+ENV LD_PRELOAD=/usr/local/lib/sandbox_network_helper.so
+
+ENTRYPOINT ["/usr/local/bin/sandbox-seal", "--", "/usr/local/bin/pi"]

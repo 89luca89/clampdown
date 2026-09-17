@@ -353,6 +353,7 @@ func SidecarMaskedPaths(workdir string, masked []agent.MaskedPath) ([]container.
 //   - Claude: --append-system-prompt-file (passed via Args)
 //   - OpenCode: ~/.config/opencode/instructions.md (auto-discovered)
 //   - Codex: ~/.codex/config.toml -> model_instructions_file
+//   - Pi: ~/.pi/agent/APPEND_SYSTEM.md (auto-discovered)
 func WriteSandboxPrompt(ag agent.Agent, homeDir, appendPrompt string) error {
 	// Claude requires onboarding to be marked complete before it accepts
 	// API key auth. Ensure the flag is set in .claude.json.
@@ -416,18 +417,22 @@ func WriteSkills(ag agent.Agent, homeDir string) error {
 	return nil
 }
 
-// resolveKey looks up an API key by name, checking the host environment
-// first, then rcEnv (.clampdownrc). Returns the value and true if found.
+// resolveKey looks up an API key by name in the host environment and in rcEnv
+// (.clampdownrc). An empty value means unset wherever it appears: a variable
+// exported blank cancels an rc entry, and an empty rc entry cancels a variable
+// exported in the shell, so `ANTHROPIC_API_KEY=` turns a provider off with no
+// other edit. Otherwise the environment wins over the rc file.
 func resolveKey(name string, rcEnv map[string]string) (string, bool) {
-	v := os.Getenv(name)
-	if v != "" {
-		return v, true
+	rcValue, inRC := rcEnv[name]
+	if inRC && rcValue == "" {
+		return "", false
 	}
-	v = rcEnv[name]
-	if v != "" {
-		return v, true
+
+	envValue, inEnv := os.LookupEnv(name)
+	if !inEnv {
+		return rcValue, rcValue != ""
 	}
-	return "", false
+	return envValue, envValue != ""
 }
 
 func MergeEnv(envs ...map[string]string) map[string]string {

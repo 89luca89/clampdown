@@ -340,7 +340,15 @@ For Claude, the SDK reads `ANTHROPIC_BASE_URL` directly. For OpenCode,
 most providers do not support a base URL environment variable. The
 launcher instead injects `OPENCODE_CONFIG_CONTENT` with the proxy URL,
 which OpenCode deep-merges at highest precedence over all other config.
-Each agent uses one provider at a time -- the first matching key wins.
+pi has no base-URL environment variable either: the launcher writes
+`~/.pi/agent/models.json`, which overrides the baseUrl of the active
+provider and of every provider sharing its key, and leaves pi's built-in
+model list and environment-key auth in place. Providers whose endpoint
+embeds a region or account id (azure-openai-responses,
+cloudflare-workers-ai) derive it from the environment when the proxy
+route is built. Each agent uses one provider at a time -- the first
+matching key wins, and `CLAMPDOWN_UPSTREAM` picks a different host for
+that key (for example opencode's zen endpoint instead of zen/go).
 
 Even if the agent connects to the upstream API directly on port 443
 (allowed by Landlock for infrastructure like models.dev and telemetry),
@@ -567,8 +575,8 @@ kernel errors into actionable instructions at the point of failure.
 │  CLAMPDOWN SKILL  (~/.claude/skills/clampdown/ + ~/.agents/...)  │
 │                                                                  │
 │  Cross-platform skill (AgentSkills.io). Written at session start │
-│  to both directories for Claude Code, Codex, Gemini, OpenCode.   │
-│  Invocable via /clampdown when agent forgets constraints.        │
+│  to both directories for Claude Code, Codex, Gemini, OpenCode    │
+│  and pi. Invocable via /clampdown when agent forgets constraints.│
 │  Auto-invoke triggers on ECONNREFUSED, permission denied, etc.   │
 ├──────────────────────────────────────────────────────────────────┤
 │  COMMAND HELPER  (sandbox_command_helper.sh, via BASH_ENV)       │

@@ -256,9 +256,9 @@ make all      # builds sidecar image, agent images, and launcher binary
 make install  # copies binary to ~/.local/bin/clampdown
 ```
 
-`make all` builds five container images (`clampdown-sidecar`, `clampdown-proxy`,
-`clampdown-claude`, `clampdown-codex`, `clampdown-opencode`) and the `clampdown`
-launcher binary. Images are rebuilt only when their source changes (stamp files).
+`make all` builds six container images (`clampdown-sidecar`, `clampdown-proxy`,
+`clampdown-claude`, `clampdown-codex`, `clampdown-opencode`, `clampdown-pi`) and the
+`clampdown` launcher binary. Images are rebuilt only when their source changes (stamp files).
 
 ---
 
@@ -291,6 +291,9 @@ clampdown opencode
 # Codex (OpenAI API key or ChatGPT subscription auth)
 clampdown codex
 
+# pi (any of the providers below; the project trust prompt is answered in-session)
+clampdown pi
+
 # Run against a specific directory (defaults to $PWD)
 clampdown claude --workdir /path/to/project
 
@@ -316,10 +319,60 @@ The first run pulls base images and builds a per-project container storage cache
 | Claude Code | `clampdown claude` | `ANTHROPIC_API_KEY` |
 | OpenAI Codex | `clampdown codex` | `OPENAI_API_KEY`, or ChatGPT subscription auth copied from `~/.codex/auth.json` |
 | OpenCode | `clampdown opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY` |
+| pi | `clampdown pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`), `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and 20+ more -- see [pi providers](#pi-providers) |
 
 Keys are passed to the auth proxy, not the agent. The first matching key (from host
 environment or `.clampdownrc`) activates the proxy for that provider. The agent
 receives a dummy key (`sk-proxy`) and a base URL pointing at the local proxy.
+
+### pi providers
+
+pi takes no base-URL environment variable, so the launcher writes
+`~/.pi/agent/models.json` before the session starts, pointing pi's providers at the
+proxy. Every provider that authenticates with a static key and a fixed endpoint is
+covered: anthropic, openai, google, groq, deepseek, mistral, xai, openrouter,
+ant-ling, azure-openai-responses, baseten, cerebras, cloudflare-workers-ai,
+fireworks, github-copilot (token), huggingface, kimi-coding, minimax, minimax-cn,
+moonshotai, moonshotai-cn, nvidia, opencode, opencode-go, qwen-token-plan,
+qwen-token-plan-cn, qwen-token-plan-individual, together, vercel-ai-gateway,
+xiaomi, xiaomi-token-plan-ams/cn/sgp, zai, and zai-coding-cn.
+
+The provider list also lands in the agent's egress allowlist, and cloudflare's
+api.cloudflare.com with it. Repointing a provider in `models.json` also repoints the
+providers that share its key (the opencode, moonshotai and qwen pairs), so switching
+provider inside pi does not send the dummy key to a real endpoint.
+
+Two providers need one more line in `.clampdownrc`:
+
+```sh
+# cloudflare-workers-ai: the account is part of the request path, and pi's own
+# credential check wants it present too
+CLOUDFLARE_ACCOUNT_ID=...
+
+# azure-openai-responses: the endpoint is per-resource and carries the
+# deployment. The proxy joins paths, so the value must be the full base URL,
+# and the version is whatever your resource accepts.
+AZURE_OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>
+AZURE_OPENAI_API_VERSION=2025-04-01-preview
+```
+
+Runs are one upstream per session: the first route whose key resolves picks it. For
+the providers that share a key (opencode/opencode-go, moonshotai/moonshotai-cn,
+qwen-token-plan/qwen-token-plan-individual) and for any other endpoint, point the
+session at the wanted host:
+
+```sh
+# ~/.config/clampdown/clampdownrc
+OPENCODE_API_KEY=<key>
+CLAMPDOWN_UPSTREAM=https://opencode.ai/zen/v1   # optional: the zen endpoint instead of zen/go
+```
+
+Four pi providers are not proxied: amazon-bedrock (its AWS SDK signs its own requests
+and ignores the configured endpoint), google-vertex (application default credentials,
+no static key), openai-codex (OAuth only -- the token lives in `auth.json`), and
+cloudflare-ai-gateway (a gateway token plus the upstream key, two credentials on one
+route). Reach them by logging in inside the session, or through a gateway that takes
+one key.
 
 ---
 
@@ -580,8 +633,13 @@ Each entry is routed by name:
 - **Agent configuration vars** are injected into the agent container, overriding
   the agent's built-in defaults, but only names on that agent's allowlist: for
   Claude the `ANTHROPIC_`, `CLAUDE_`, `DISABLE_`, and `ENABLE_` namespaces plus a
-  few standalone limits; for OpenCode `OPENCODE_MODEL`; Codex takes none (it is
-  configured through its config file). Credential- and endpoint-shaped names
+  few standalone limits; for OpenCode `OPENCODE_MODEL`; for pi the `PI_`
+  terminal-rendering names (`PI_TRUE_COLOR`, `PI_HYPERLINKS`, ...) plus the
+  non-secret provider vars pi resolves itself (`CLOUDFLARE_ACCOUNT_ID`,
+  `AZURE_OPENAI_API_VERSION`) -- not `PI_CODING_AGENT_DIR`, which would let a
+  workdir file repoint pi's config directory; Codex takes none (it is configured
+  through its config file).
+  Credential- and endpoint-shaped names
   (`*_API_KEY`, `*_TOKEN`, `*_BASE_URL`, ...) and clampdown's own sandbox vars
   (`SANDBOX_POLICY`, `HOME`, ...) are never injected.
 
@@ -612,6 +670,7 @@ make proxy             # auth proxy image only
 make claude            # claude agent image only
 make codex             # codex agent image only
 make opencode          # opencode agent image only
+make pi                # pi agent image only
 make launcher          # launcher binary only
 make install           # install launcher to ~/.local/bin/
 make clean             # remove built images and binaries
@@ -632,12 +691,12 @@ make dev
 
 This runs `make all` and `make install`, then writes your config file
 (`~/.config/clampdown/config.json`) to point `sidecar_image`, `proxy_image`,
-and the `agent_images` map (claude, codex, opencode) at the local image
+and the `agent_images` map (claude, codex, opencode, pi) at the local image
 tags (`clampdown-sidecar:latest`, etc.) instead of the default `ghcr.io`
 registry images.
 
 The config file is merged, not overwritten -- existing settings are preserved.
-All three agent images are set at once, so any agent can be launched without
+All four agent images are set at once, so any agent can be launched without
 re-running `make dev`.
 
 ```sh
@@ -647,6 +706,7 @@ make dev
 clampdown claude
 clampdown codex
 clampdown opencode
+clampdown pi
 ```
 
 To revert to registry images:

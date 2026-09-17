@@ -10,6 +10,7 @@ pkg/
     claude.go                    Claude Code agent (image, egress domains, prompt)
     codex.go                     OpenAI Codex agent (API proxy + ChatGPT auth cache prep)
     opencode.go                  OpenCode agent (image, egress domains, prompt)
+    pi.go                        pi agent (image, provider route table, models.json proxy routing)
     skill.go                     Sandbox skill template + skill directory helpers
   cli/
     app.go                       urfave/cli commands (agent subcommands, network, session)
@@ -83,6 +84,8 @@ container-images/
     Containerfile                Codex agent image (Alpine + native Codex CLI binary)
   opencode/
     Containerfile                OpenCode agent image (Alpine + native Bun binary)
+  pi/
+    Containerfile                pi agent image (Alpine + nodejs + pinned npm package)
   proxy/
     proxy.go                     Auth proxy: reverse proxy with API key injection (stdlib only)
     Containerfile                FROM scratch proxy image (seal + auth-proxy + CA certs)

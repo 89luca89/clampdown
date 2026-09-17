@@ -165,6 +165,12 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 			return "", fmt.Errorf("prepare codex home: %w", err)
 		}
 	}
+	if ag.Name() == "pi" {
+		err = agent.PreparePiHome(p.Home, ag.ProxyRoutes(), proxyRoute)
+		if err != nil {
+			return "", fmt.Errorf("prepare pi home: %w", err)
+		}
+	}
 
 	// Write cross-platform skills to both .claude/skills/ and .agents/skills/.
 	err = WriteSkills(ag, p.Home)

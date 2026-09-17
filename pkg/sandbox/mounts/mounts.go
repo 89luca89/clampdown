@@ -40,6 +40,7 @@ var UniversalProtectedPaths = []agent.ProtectedPath{
 	{Path: ".claude/CLAUDE-clampdown.md", IsDir: false, GlobalPath: true},
 	{Path: ".codex/AGENTS-clampdown.md", IsDir: false, GlobalPath: true},
 	{Path: ".config/opencode/AGENTS.md", IsDir: false, GlobalPath: true},
+	{Path: ".pi/agent/APPEND_SYSTEM.md", IsDir: false, GlobalPath: true},
 	// Agent-native global instruction files auto-discovered from HOME.
 	{Path: ".claude/CLAUDE.md", IsDir: false, GlobalPath: true},
 	{Path: ".claude/rules", IsDir: true, GlobalPath: true},
