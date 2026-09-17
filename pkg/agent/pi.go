@@ -65,17 +65,20 @@ func (p *Pi) EgressDomains() []string {
 
 func (p *Pi) Mounts() []Mount { return nil }
 
-// ConfigOverlays forwards the host's pi settings, prompt templates and skills
-// read-only. auth.json is deliberately not forwarded: it outranks the
-// environment in pi's credential resolution, so seeding it would put the real
-// key inside the agent container. models.json is generated per session by
-// PreparePiHome.
+// ConfigOverlays forwards the host's pi settings, prompt templates, skills,
+// extensions and agent definitions read-only. Extensions run as code inside
+// pi's process, so they get the same trust as the agent itself. auth.json is
+// deliberately not forwarded: it outranks the environment in pi's credential
+// resolution, so seeding it would put the real key inside the agent container.
+// models.json is generated per session by PreparePiHome.
 func (p *Pi) ConfigOverlays() []Mount {
 	agentDir := filepath.Join(Home, ".pi", "agent")
 	return []Mount{
 		{Src: filepath.Join(agentDir, "settings.json"), Dst: filepath.Join(agentDir, "settings.json")},
 		{Src: filepath.Join(agentDir, "prompts"), Dst: filepath.Join(agentDir, "prompts")},
 		{Src: filepath.Join(agentDir, "skills"), Dst: filepath.Join(agentDir, "skills")},
+		{Src: filepath.Join(agentDir, "extensions"), Dst: filepath.Join(agentDir, "extensions")},
+		{Src: filepath.Join(agentDir, "agents"), Dst: filepath.Join(agentDir, "agents")},
 	}
 }
 
