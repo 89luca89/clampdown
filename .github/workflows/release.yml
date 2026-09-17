@@ -86,7 +86,7 @@ jobs:
             container-images/sidecar/hooks/createRuntime/security-policy \
             container-images/sidecar/hooks/precreate/seal-inject \
             container-images/proxy/auth-proxy
-      - uses: docker/login-action@v4.3.0
+      - uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/login-action@v4.3.0
+      - uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
