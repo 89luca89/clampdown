@@ -173,10 +173,15 @@ func (p *Pi) ProxyRoutes() []ProxyRoute {
 		// The account is part of the path, so it comes from the environment
 		// rather than the route; pi reads the same variable for its own
 		// credential check (see EnvAllowlist).
-		{Port: ProxyPort, KeyEnv: "CLOUDFLARE_API_KEY",
-			UpstreamEnv: "CLOUDFLARE_ACCOUNT_ID", UpstreamTemplate: "https://api.cloudflare.com/client/v4/accounts/%s/ai/v1",
-			HeaderName: "Authorization", HeaderPrefix: "Bearer ",
-			ProviderID: "cloudflare-workers-ai"},
+		{
+			Port:             ProxyPort,
+			KeyEnv:           "CLOUDFLARE_API_KEY",
+			UpstreamEnv:      "CLOUDFLARE_ACCOUNT_ID",
+			UpstreamTemplate: "https://api.cloudflare.com/client/v4/accounts/%s/ai/v1",
+			HeaderName:       "Authorization",
+			HeaderPrefix:     "Bearer ",
+			ProviderID:       "cloudflare-workers-ai",
+		},
 		{Port: ProxyPort, Upstream: "https://api.fireworks.ai/inference",
 			KeyEnv: "FIREWORKS_API_KEY", HeaderName: "Authorization", HeaderPrefix: "Bearer ",
 			ProviderID: "fireworks"},
@@ -317,14 +322,14 @@ func writePiModels(path string, routes []ProxyRoute, active *ProxyRoute) error {
 	if err != nil {
 		return fmt.Errorf("marshal pi models config: %w", err)
 	}
-	content := append(data, '\n')
+	data = append(data, '\n')
 
 	existing, err := os.ReadFile(path)
-	if err == nil && string(existing) == string(content) {
+	if err == nil && string(existing) == string(data) {
 		return nil
 	}
 
-	err = os.WriteFile(path, content, 0o600)
+	err = os.WriteFile(path, data, 0o600)
 	if err != nil {
 		return fmt.Errorf("write pi models config: %w", err)
 	}

@@ -73,9 +73,9 @@ func LoadRC(workdir, envFile string) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("clampdownrc %s: %w", envFile, err)
 		}
-		explicit, err := ParseRC(envFile)
-		if err != nil {
-			return nil, err
+		explicit, parseErr := ParseRC(envFile)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		maps.Copy(global, explicit)
 	}

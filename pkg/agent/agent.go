@@ -5,6 +5,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -43,10 +44,8 @@ type EnvAllow struct {
 
 // Allows reports whether name is admitted by this allowlist.
 func (e EnvAllow) Allows(name string) bool {
-	for _, n := range e.Names {
-		if name == n {
-			return true
-		}
+	if slices.Contains(e.Names, name) {
+		return true
 	}
 	for _, p := range e.Prefixes {
 		if strings.HasPrefix(name, p) {

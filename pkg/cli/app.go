@@ -796,11 +796,13 @@ func resolveAppendPrompt(inline, file string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("append-system-prompt-file: %w", err)
 		}
-		if s := strings.TrimSpace(string(data)); s != "" {
+		s := strings.TrimSpace(string(data))
+		if s != "" {
 			parts = append(parts, s)
 		}
 	}
-	if s := strings.TrimSpace(inline); s != "" {
+	s := strings.TrimSpace(inline)
+	if s != "" {
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, "\n\n"), nil

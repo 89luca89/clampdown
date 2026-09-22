@@ -399,7 +399,8 @@ func main() {
 		}
 	}
 
-	if _, statErr := os.Stat(kvmDevice); statErr == nil {
+	_, statErr := os.Stat(kvmDevice)
+	if statErr == nil {
 		kvmMount, _ := json.Marshal(mount{
 			Source:      kvmDevice,
 			Destination: kvmDevice,

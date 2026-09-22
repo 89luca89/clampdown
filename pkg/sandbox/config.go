@@ -567,12 +567,16 @@ func ActiveProxyRoute(ag agent.Agent, rcEnv map[string]string) *agent.ProxyRoute
 // when none applies or the override is not a valid https URL.
 func resolveProxyUpstream(route *agent.ProxyRoute, rcEnv map[string]string) string {
 	override := ""
-	if route.BaseURLEnv != "" && rcEnv[route.BaseURLEnv] != "" {
+	switch {
+	case route.BaseURLEnv != "" && rcEnv[route.BaseURLEnv] != "":
 		override = rcEnv[route.BaseURLEnv]
-	} else if v := rcEnv[upstreamOverrideEnv]; v != "" {
-		override = v
-	} else if v, ok := resolveUpstreamEnv(route, rcEnv); ok {
-		override = v
+	case rcEnv[upstreamOverrideEnv] != "":
+		override = rcEnv[upstreamOverrideEnv]
+	default:
+		v, ok := resolveUpstreamEnv(route, rcEnv)
+		if ok {
+			override = v
+		}
 	}
 	if override == "" {
 		return route.Upstream
