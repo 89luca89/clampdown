@@ -16,8 +16,8 @@ func TestBuildNotifFilter(t *testing.T) {
 	syscalls := interceptedSyscalls
 	filter := buildNotifFilter(auditArch, syscalls)
 
-	// 4 preamble (load arch, check, kill, load NR) + len(syscalls) checks + 2 returns (ALLOW, USER_NOTIF)
-	expectedLen := 4 + len(syscalls) + 2
+	// 6 preamble (load arch, check, kill, load NR, check x32, kill) + len(syscalls) checks + 2 returns (ALLOW, USER_NOTIF)
+	expectedLen := 6 + len(syscalls) + 2
 	if len(filter) != expectedLen {
 		t.Fatalf("expected %d instructions, got %d", expectedLen, len(filter))
 	}
@@ -37,9 +37,25 @@ func TestBuildNotifFilter(t *testing.T) {
 		t.Errorf("instruction 2: expected KILL_PROCESS %#x, got %#x", unix.SECCOMP_RET_KILL_PROCESS, filter[2].K)
 	}
 
+	// Verify the x32 ABI bit is killed. On x86-64 x32 shares
+	// AUDIT_ARCH_X86_64, so without this check an x32 syscall number
+	// skips the arch comparison and falls through to ALLOW.
+	if filter[4].Code != unix.BPF_JMP|unix.BPF_JSET|unix.BPF_K {
+		t.Errorf("instruction 4: expected JSET, got %#x", filter[4].Code)
+	}
+	if filter[4].K != x32SyscallBit {
+		t.Errorf("instruction 4: expected x32 bit %#x, got %#x", x32SyscallBit, filter[4].K)
+	}
+	if filter[4].Jt != 0 || filter[4].Jf != 1 {
+		t.Errorf("instruction 4: expected Jt=0 (bit set -> kill), Jf=1, got Jt=%d Jf=%d", filter[4].Jt, filter[4].Jf)
+	}
+	if filter[5].K != unix.SECCOMP_RET_KILL_PROCESS {
+		t.Errorf("instruction 5: expected KILL_PROCESS %#x, got %#x", unix.SECCOMP_RET_KILL_PROCESS, filter[5].K)
+	}
+
 	// Verify all intercepted syscall numbers are present.
 	found := make(map[uint32]bool)
-	for i := 4; i < 4+len(syscalls); i++ {
+	for i := 6; i < 6+len(syscalls); i++ {
 		found[filter[i].K] = true
 	}
 	for _, nr := range syscalls {
@@ -49,7 +65,7 @@ func TestBuildNotifFilter(t *testing.T) {
 	}
 
 	// Verify ALLOW and USER_NOTIF returns.
-	allowIdx := 4 + len(syscalls)
+	allowIdx := 6 + len(syscalls)
 	notifIdx := allowIdx + 1
 	if filter[allowIdx].K != unix.SECCOMP_RET_ALLOW {
 		t.Errorf("instruction %d: expected ALLOW %#x, got %#x", allowIdx, unix.SECCOMP_RET_ALLOW, filter[allowIdx].K)
@@ -64,7 +80,7 @@ func TestBuildNotifFilter(t *testing.T) {
 	}
 
 	// Verify all jumps target USER_NOTIF.
-	for i := 4; i < 4+len(syscalls); i++ {
+	for i := 6; i < 6+len(syscalls); i++ {
 		expectedJt := uint8(notifIdx - i - 1)
 		if filter[i].Jt != expectedJt {
 			t.Errorf("instruction %d: expected Jt=%d (-> USER_NOTIF), got %d", i, expectedJt, filter[i].Jt)

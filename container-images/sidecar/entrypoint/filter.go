@@ -31,6 +31,13 @@ const (
 	dataOffArch = 4 // offsetof(struct seccomp_data, arch)
 )
 
+// x32SyscallBit is __X32_SYSCALL_BIT. On x86-64 the x32 ABI shares
+// AUDIT_ARCH_X86_64 with the native ABI and is distinguished only by this
+// bit in the syscall number. Without an explicit check an x32 syscall
+// passes the arch comparison and its number never matches a native number,
+// so it falls through to ALLOW. See seccomp(2).
+const x32SyscallBit = 0x40000000
+
 // seccompNotif is the kernel notification struct (struct seccomp_notif).
 // Not provided by x/sys/unix. Size: 80 bytes on both amd64 and arm64.
 type seccompNotif struct {
@@ -63,9 +70,9 @@ type seccompNotifResp struct {
 func buildNotifFilter(arch uint32, syscalls []uint32) []unix.SockFilter {
 	n := len(syscalls)
 	// Layout: [0] load arch, [1] check arch, [2] kill,
-	//         [3] load NR, [4..4+n-1] JEQ checks,
-	//         [4+n] ALLOW, [4+n+1] USER_NOTIF
-	notifIdx := uint32(4 + n + 1)
+	//         [3] load NR, [4] check x32 bit, [5] kill,
+	//         [6..6+n-1] JEQ checks, [6+n] ALLOW, [6+n+1] USER_NOTIF
+	notifIdx := uint32(6 + n + 1)
 
 	filter := make([]unix.SockFilter, 0, notifIdx+1)
 
@@ -90,10 +97,23 @@ func buildNotifFilter(arch uint32, syscalls []uint32) []unix.SockFilter {
 		Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS,
 		K:    dataOffNR,
 	})
+	// x32 ABI shares AUDIT_ARCH_X86_64 with the native ABI and is
+	// distinguished only by __X32_SYSCALL_BIT in the syscall number.
+	// Bit set -> kill; otherwise the number never matches a native
+	// number and would fall through to ALLOW.
+	filter = append(filter, unix.SockFilter{
+		Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K,
+		Jt:   0, Jf: 1,
+		K:    x32SyscallBit,
+	})
+	filter = append(filter, unix.SockFilter{
+		Code: unix.BPF_RET | unix.BPF_K,
+		K:    unix.SECCOMP_RET_KILL_PROCESS,
+	})
 
 	// For each intercepted syscall: JEQ -> USER_NOTIF, fall through otherwise.
 	for i, nr := range syscalls {
-		jt := uint8(notifIdx - uint32(4+i) - 1)
+		jt := uint8(notifIdx - uint32(6+i) - 1)
 		filter = append(filter, unix.SockFilter{
 			Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K,
 			Jt:   jt, Jf: 0,
