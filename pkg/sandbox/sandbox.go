@@ -40,6 +40,7 @@ type Options struct {
 	AgentImage         string
 	AgentPolicy        string
 	AllowHooks         bool
+	AllowKVM           bool
 	AppendSystemPrompt string
 	CPUs               int
 	EnableTripwire     bool
@@ -138,6 +139,18 @@ func Start(ctx context.Context, rt container.Runtime, ag agent.Agent, opts Optio
 	}
 
 	warnIfRootful(ctx, rt)
+
+	if opts.AllowKVM {
+		if !fileExists(kvmDevice) {
+			return "", fmt.Errorf("--allow-kvm: %s not present on the host", kvmDevice)
+		}
+		fmt.Fprintf(os.Stderr, "\n"+
+			"  note: --allow-kvm exposes %s to the container.\n"+
+			"  Container hardening still applies, but a kernel bug in that interface is\n"+
+			"  an escape, like any host kernel bug. Keep the kernel current.\n"+
+			"  The device must be readable and writable by the container user (mode 0666,\n"+
+			"  or the kvm group with --group-add keep-groups).\n\n", kvmDevice)
+	}
 
 	rt.CleanStale(ctx, containerPrefix)
 

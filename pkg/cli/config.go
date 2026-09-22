@@ -16,6 +16,7 @@ type Config struct {
 	AgentImages    map[string]string `json:"agent_images"`
 	AgentPolicy    string            `json:"agent_policy"`
 	AllowHooks     bool              `json:"allow_hooks"`
+	AllowKVM       bool              `json:"allow_kvm"`
 	CPUs           int               `json:"cpus"`
 	EnableTripwire bool              `json:"tripwire"`
 	GH             bool              `json:"gh"`

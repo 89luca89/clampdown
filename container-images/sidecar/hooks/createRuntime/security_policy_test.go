@@ -569,6 +569,63 @@ func TestCheckDevices_HasDevice(t *testing.T) {
 	}
 }
 
+// kvmPresent points kvmDevicePath at an existing file for the duration of a
+// test, simulating a sidecar that received /dev/kvm via --allow-kvm.
+func kvmPresent(t *testing.T) {
+	t.Helper()
+	old := kvmDevicePath
+	kvmDevicePath = filepath.Join(t.TempDir(), "kvm")
+	err := os.WriteFile(kvmDevicePath, nil, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kvmDevicePath = old })
+}
+
+func TestCheckDevices_KVMAllowedWhenForwarded(t *testing.T) {
+	kvmPresent(t)
+	c := baseConfig()
+	c.Linux.Devices = []struct {
+		Path string `json:"path"`
+	}{{Path: "/dev/kvm"}}
+	err := checkDevices(c)
+	if err != nil {
+		t.Errorf("expected /dev/kvm to be allowed when forwarded, got: %v", err)
+	}
+}
+
+func TestCheckDevices_KVMBlockedWhenAbsent(t *testing.T) {
+	old := kvmDevicePath
+	kvmDevicePath = filepath.Join(t.TempDir(), "absent")
+	t.Cleanup(func() { kvmDevicePath = old })
+	c := baseConfig()
+	c.Linux.Devices = []struct {
+		Path string `json:"path"`
+	}{{Path: "/dev/kvm"}}
+	err := checkDevices(c)
+	if err == nil {
+		t.Fatal("expected /dev/kvm to be blocked when not forwarded")
+	}
+}
+
+func TestCheckMounts_KVMAllowedWhenForwarded(t *testing.T) {
+	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
+	kvmPresent(t)
+	c := baseConfig()
+	c.Mounts = []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		{Source: "/dev/kvm", Destination: "/dev/kvm", Type: "bind", Options: []string{"bind"}},
+	}
+	err := checkMounts(c)
+	if err != nil {
+		t.Errorf("expected /dev/kvm mount to be allowed when forwarded, got: %v", err)
+	}
+}
+
 func TestCheckMaskedPaths_Removed(t *testing.T) {
 	c := baseConfig()
 	c.Linux.MaskedPaths = c.Linux.MaskedPaths[:len(c.Linux.MaskedPaths)-1]

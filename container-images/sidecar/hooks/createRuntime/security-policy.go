@@ -244,6 +244,19 @@ func checkCaps(config Config) error {
 // Overridable in tests.
 var clampdownSeccompPath = "/etc/containers/seccomp_nested.json"
 
+// kvmDevice is the only device --allow-kvm forwards. kvmDevicePath is the
+// path checked for presence; overridable in tests.
+const kvmDevice = "/dev/kvm"
+
+var kvmDevicePath = kvmDevice
+
+// kvmForwarded reports whether the launcher passed /dev/kvm into the sidecar.
+// If it did, nested containers may have exactly that device and no other.
+func kvmForwarded() bool {
+	_, err := os.Stat(kvmDevicePath)
+	return err == nil
+}
+
 // seccompRule represents a single syscall rule for comparison.
 // Two rules match if they have the same action, sorted names, and args.
 type seccompRule struct {
@@ -403,6 +416,9 @@ func checkMounts(config Config) error {
 		}
 		if isSubPath(workdir, source) ||
 			source == "/sandbox-seal" || source == "/rename_exdev_shim.so" {
+			continue
+		}
+		if source == kvmDevice && kvmForwarded() {
 			continue
 		}
 		allowed := false
@@ -709,7 +725,10 @@ func isEmptyDir(path string) bool {
 }
 
 func checkDevices(config Config) error {
-	if len(config.Linux.Devices) > 0 {
+	for _, dev := range config.Linux.Devices {
+		if dev.Path == kvmDevice && kvmForwarded() {
+			continue
+		}
 		return blocked(int(syscall.EACCES), "device access not permitted in nested containers")
 	}
 	return nil

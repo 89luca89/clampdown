@@ -134,3 +134,38 @@ additional isolation that native Linux containers lack:
 - Docker Desktop is explicitly blocked at the moment: its `fakeowner` FUSE filesystem
   is incompatible with Landlock enforcement. Use colima or podman machine
   instead.
+
+### `--allow-kvm`
+
+`--allow-kvm` forwards the host `/dev/kvm` into the sidecar and, by presence,
+into every nested container, so the agent can run accelerated QEMU for kernel
+development. It is off by default.
+
+The flag works by exposing more of the host kernel to the container. A container
+normally reaches the kernel through the workload syscall surface that seccomp
+and Landlock are built around. KVM adds a second and much larger surface, the
+virtualization interface, which is not namespaced, needs no capability, and is
+not covered by the container's syscall or filesystem rules. The gate on it is
+the device node's permissions.
+
+A bug in that surface is a host kernel bug, and the process exploiting it ends
+up outside the container. That is the same class of failure this document
+already lists for kernel bugs such as Dirty COW: a bug in the kernel the
+container shares, not in the container's configuration, so no container-level
+control prevents it. Keeping the host kernel patched is the mitigation, as for
+every other kernel-level concern here.
+
+What is different is that this exposure is opt-in. The syscalls behind the Dirty
+COW class cannot be removed without breaking every workload, so that surface is
+always present; `/dev/kvm` is not. Container hardening still does its job for
+everything else: the agent stays unprivileged, `cap-drop` is `ALL`, seccomp and
+Landlock still apply, and a bug in the VMM's userspace device model is still
+contained.
+
+It is intended for a dedicated development host, where the kernel is kept
+current and the machine is not shared.
+
+The device must be readable and writable by the container user. With rootless
+podman and `--userns=keep-id` the host's kvm group is not mapped, so `/dev/kvm`
+at `0660 root:kvm` is not openable; use mode `0666` or pass `--group-add
+keep-groups`.

@@ -25,6 +25,10 @@ import (
 const (
 	SidecarImage = "ghcr.io/89luca89/clampdown-sidecar:latest"
 	ProxyImage   = "ghcr.io/89luca89/clampdown-proxy:latest"
+
+	// kvmDevice is the only device --allow-kvm forwards. It goes to the
+	// sidecar and, by presence, into every nested container.
+	kvmDevice = "/dev/kvm"
 )
 
 func orDefault(override, def string) string {
@@ -66,7 +70,7 @@ func sidecarConfig(
 		authFile = findAuthFile()
 	}
 
-	return container.SidecarContainerConfig{
+	cfg := container.SidecarContainerConfig{
 		AuthFile:       authFile,
 		Labels:         labels(session, "sidecar", ag, opts),
 		Name:           name,
@@ -103,6 +107,10 @@ func sidecarConfig(
 			"SANDBOX_WORKDIR":        opts.Workdir,
 		},
 	}
+	if opts.AllowKVM {
+		cfg.Devices = []string{kvmDevice}
+	}
+	return cfg
 }
 
 func agentConfig(

@@ -154,6 +154,11 @@ func Run(args []string) error {
 				Usage: "Forward ~/.config/gh read-only into tool containers (GitHub CLI auth)",
 			},
 			&ucli.BoolFlag{
+				Name:  "allow-kvm",
+				Value: cfg.AllowKVM,
+				Usage: "Forward /dev/kvm into nested containers (kernel dev; exposes the host KVM subsystem)",
+			},
+			&ucli.BoolFlag{
 				Name:  "ssh",
 				Value: cfg.SSH,
 				Usage: "Forward SSH agent socket into tool containers (SSH_AUTH_SOCK)",
@@ -371,6 +376,7 @@ func runAgent(agName string, cfg Config) ucli.ActionFunc {
 			AgentImage:         resolveAgentImage(cmd.String("agent-image"), cfg, agName),
 			AgentPolicy:        cmd.String("agent-policy"),
 			AllowHooks:         cmd.Bool("allow-hooks"),
+			AllowKVM:           cmd.Bool("allow-kvm"),
 			AppendSystemPrompt: appendPrompt,
 			CPUs:               cmd.Int("cpus"),
 			EnableTripwire:     cmd.Bool("tripwire"),

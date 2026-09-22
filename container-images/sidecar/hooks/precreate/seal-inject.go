@@ -22,6 +22,7 @@ const (
 	sealBinary = "/sandbox-seal"
 	sealDest   = "/.sandbox/seal"
 	policyEnv  = "SANDBOX_POLICY"
+	kvmDevice  = "/dev/kvm"
 )
 
 type landlockPolicy struct {
@@ -396,6 +397,16 @@ func main() {
 			env = append(env, ig.env+"="+ig.envVal)
 			envSeen[ig.env] = true
 		}
+	}
+
+	if _, statErr := os.Stat(kvmDevice); statErr == nil {
+		kvmMount, _ := json.Marshal(mount{
+			Source:      kvmDevice,
+			Destination: kvmDevice,
+			Type:        "bind",
+			Options:     []string{"bind"},
+		})
+		rawMounts = append(rawMounts, json.RawMessage(kvmMount))
 	}
 	process["env"], _ = json.Marshal(env)
 	config["process"], _ = json.Marshal(process)
