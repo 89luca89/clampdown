@@ -35,6 +35,17 @@ argument-hint: [error or topic]
 
 ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if unsure.
 
+## When You Reach This Point
+
+You are reading this because the automatic adaptation layer (command helper,
+network helper, LD_PRELOAD hints, base prompt guidance) has already run and you
+are still blocked. That means containers do not help, network helpers do not help,
+and the prompt guidance was already followed. Do not try further workarounds.
+State clearly what you tried and what the sandbox returned, then ask the user
+to adjust their sandbox settings (` +
+	"`--agent-allow`" + `, ` + "`--protect`" + `, ` +
+	"`--mask`" + `, or ` + "`--allow-*`" + `) or accept that the workflow is out of scope.
+
 ## Current Session
 ` + "```" + `!
 echo "Session: $SANDBOX_SESSION"
