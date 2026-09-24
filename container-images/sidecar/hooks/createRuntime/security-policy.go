@@ -115,14 +115,10 @@ var requiredNamespaces = []string{"pid", "network", "ipc", "mount", "cgroup", "u
 // either OCI maskedPaths OR a /dev/null or /.empty bind mount in the spec.
 var requiredMaskedPaths = []string{
 	"/proc/acpi",
-	"/proc/asound",
 	"/proc/cmdline",
 	"/proc/kallsyms",
 	"/proc/kcore",
 	"/proc/keys",
-	"/proc/kpagecgroup",
-	"/proc/kpagecount",
-	"/proc/kpageflags",
 	"/proc/modules",
 	"/proc/scsi",
 	"/proc/sysrq-trigger",
