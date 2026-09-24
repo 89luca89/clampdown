@@ -114,13 +114,22 @@ var requiredNamespaces = []string{"pid", "network", "ipc", "mount", "cgroup", "u
 // checkMaskedPaths validates defense-in-depth: each path must be covered by
 // either OCI maskedPaths OR a /dev/null or /.empty bind mount in the spec.
 var requiredMaskedPaths = []string{
+	"/proc/acpi",
+	"/proc/asound",
 	"/proc/cmdline",
 	"/proc/kallsyms",
 	"/proc/kcore",
+	"/proc/keys",
+	"/proc/kpagecgroup",
+	"/proc/kpagecount",
+	"/proc/kpageflags",
 	"/proc/modules",
+	"/proc/scsi",
 	"/proc/sysrq-trigger",
+	"/proc/timer_list",
 	"/proc/version",
 	"/sys/devices/virtual/dmi",
+	"/sys/firmware",
 	"/sys/fs/bpf",
 	"/sys/kernel/debug",
 	"/sys/kernel/security",
@@ -684,6 +693,13 @@ func checkMaskedPaths(config Config) error {
 	}
 
 	for _, required := range requiredMaskedPaths {
+		// Graceful fallback: if the path doesn't exist on the host kernel,
+		// the nested container's procfs/sysfs won't expose it either, so
+		// no mask is required.
+		_, err := os.Stat(required)
+		if err != nil {
+			continue
+		}
 		if !covered[required] {
 			return blocked(int(syscall.EPERM),
 				"sensitive path '%s' is neither in maskedPaths nor covered by a /dev/null or empty-dir bind mount",

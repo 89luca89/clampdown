@@ -53,8 +53,8 @@ func readStringFromPID(pid uint32, addr uint64) (string, error) {
 
 // syscallErrno extracts the syscall errno from any error.
 func syscallErrno(err error) int32 {
-	var errno unix.Errno
-	if errors.As(err, &errno) {
+	errno, ok := errors.AsType[unix.Errno](err)
+	if ok {
 		return int32(errno)
 	}
 	return int32(unix.EIO)

@@ -110,9 +110,9 @@ func parseMountInfo(path, workdir string) map[string]bool {
 	return protected
 }
 
-// maskSensitivePaths masks /proc and /sys files that aid kernel exploit
-// development. Bind-mounts /dev/null over each path. Skips paths that
-// don't exist on this kernel.
+// maskSensitivePaths masks /proc and /sys files and directories that aid
+// kernel exploit development. Files are bind-mounted with /dev/null; dirs
+// with /empty. Paths absent on this kernel are skipped silently.
 func maskSensitivePaths() {
 	for _, p := range []string{
 		"/proc/cmdline",
@@ -120,9 +120,17 @@ func maskSensitivePaths() {
 		"/proc/diskstats",
 		"/proc/kallsyms",
 		"/proc/kcore",
+		"/proc/keys",
+		"/proc/kpagecgroup",
+		"/proc/kpagecount",
+		"/proc/kpageflags",
+		"/proc/latency_stats",
 		"/proc/modules",
 		"/proc/partitions",
+		"/proc/sched_debug",
 		"/proc/sysrq-trigger",
+		"/proc/timer_list",
+		"/proc/timer_stats",
 		"/proc/version",
 		"/sys/kernel/vmcoreinfo",
 	} {
@@ -131,6 +139,24 @@ func maskSensitivePaths() {
 			continue
 		}
 		err = unix.Mount("/dev/null", p, "", unix.MS_BIND, "")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: mask %s: %v\n", p, err)
+		}
+	}
+	// Directory paths -- masked with /empty bind (empty dir in sidecar rootfs).
+	for _, p := range []string{
+		"/proc/acpi",
+		"/proc/asound",
+		"/proc/scsi",
+		"/sys/devices/virtual/powercap",
+		"/sys/firmware",
+		"/sys/fs/selinux",
+	} {
+		_, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		err = unix.Mount("/empty", p, "", unix.MS_BIND, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: mask %s: %v\n", p, err)
 		}
