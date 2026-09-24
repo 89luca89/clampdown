@@ -6,7 +6,7 @@ go 1.26.0
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/urfave/cli/v3 v3.12.0
+	github.com/urfave/cli/v3 v3.13.0
 	golang.org/x/term v0.46.0
 )
 
