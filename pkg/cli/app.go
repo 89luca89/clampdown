@@ -66,7 +66,7 @@ func Run(args []string) error {
 				Name:    "runtime",
 				Value:   cfg.Runtime,
 				Sources: ucli.EnvVars("CONTAINER_RUNTIME"),
-				Usage:   "Container runtime (podman, docker, nerdctl)",
+				Usage:   "Container runtime (podman, docker)",
 			},
 			&ucli.StringFlag{
 				Name:  "sidecar-image",

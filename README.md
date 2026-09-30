@@ -212,7 +212,7 @@ access sets, capability lists, OCI hook pipeline, and masked path inventory -- s
 |-------------|---------|-------|
 | Linux kernel | >= 6.2 | Hard requirement (Landlock V3). Runs natively or in a VM (see below). |
 | Kernel | >= 6.12 | Recommended. V4 TCP connect (6.7), V5 IoctlDev (6.10), V6 IPC scoping (6.12). V7 audit logging (6.15). |
-| Container runtime | any recent | rootless podman (preferred), Docker, or nerdctl |
+| Container runtime | any recent | rootless podman (preferred) or Docker |
 | Go | >= 1.23 | Build-time only |
 
 ### Platform support
@@ -452,7 +452,7 @@ Credentials are opt-in. Nothing is forwarded by default.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--runtime` | auto | Container runtime: `podman`, `docker`, `nerdctl` |
+| `--runtime` | auto | Container runtime: `podman` or `docker` |
 | `--tripwire` | off | Kill session on protected path modification (restores on exit either way) |
 | `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
 | `--append-system-prompt` | -- | Append text to clampdown's injected system prompt (all agents) |

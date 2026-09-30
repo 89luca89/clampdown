@@ -22,7 +22,7 @@ func Detect() (Runtime, error) {
 			return forName(name)
 		}
 	}
-	return nil, errors.New("no container runtime found (install podman, docker, or nerdctl)")
+	return nil, errors.New("no container runtime found (install podman or docker)")
 }
 
 // ForName returns the runtime for the given binary name.

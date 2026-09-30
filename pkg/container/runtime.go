@@ -13,7 +13,7 @@ import (
 // SidecarAPI is the endpoint where the sidecar's podman service listens.
 const SidecarAPI = "tcp://localhost:2375"
 
-// Runtime abstracts container operations across podman/docker/nerdctl.
+// Runtime abstracts container operations across podman/docker.
 type Runtime interface {
 	CleanStale(ctx context.Context, prefix string)
 	Exec(ctx context.Context, container string, cmd []string, env map[string]string) ([]byte, error)

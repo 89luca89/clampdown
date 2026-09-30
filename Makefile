@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-CTR      ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || command -v nerdctl 2>/dev/null)
+CTR      ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 GOARCH   ?= $(shell go env GOARCH)
 REGISTRY ?=
 TAG      ?= latest
