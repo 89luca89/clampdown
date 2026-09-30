@@ -74,7 +74,6 @@ func (c *Claude) ProxyRoutes() []ProxyRoute {
 			HeaderName:   "Authorization",
 			HeaderPrefix: "Bearer ",
 			BaseURLEnv:   "ANTHROPIC_BASE_URL",
-			OAuth:        true,
 		},
 	}
 }

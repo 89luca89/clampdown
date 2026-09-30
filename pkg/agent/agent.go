@@ -24,7 +24,6 @@ type ProxyRoute struct {
 	HeaderPrefix   string
 	BaseURLEnv     string
 	ProviderID     string
-	OAuth          bool
 	// UpstreamEnv names a variable holding the part of the upstream the route
 	// cannot hardcode, such as a region or an account id. UpstreamTemplate
 	// formats it into a URL (%s); without a template the value is the URL.
