@@ -516,34 +516,6 @@ func checkDualPathProtected(
 	}
 }
 
-// handleLinkat blocks hardlink creation to/from protected paths.
-//
-//	linkat(olddirfd, oldpath, newdirfd, newpath, flags)
-//	args[0]=olddirfd, args[1]=oldpath ptr, args[2]=newdirfd, args[3]=newpath ptr
-func handleLinkat(
-	notif *seccompNotif,
-	resp *seccompNotifResp,
-	pid uint32,
-	protected map[string]bool,
-	notifFD int,
-) {
-	checkDualPathProtected(notif, resp, pid, protected, notifFD, "linkat")
-}
-
-// handleRenameat2 blocks renaming into/out of protected paths.
-//
-//	renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
-//	args[0]=olddirfd, args[1]=oldpath ptr, args[2]=newdirfd, args[3]=newpath ptr
-func handleRenameat2(
-	notif *seccompNotif,
-	resp *seccompNotifResp,
-	pid uint32,
-	protected map[string]bool,
-	notifFD int,
-) {
-	checkDualPathProtected(notif, resp, pid, protected, notifFD, "renameat2")
-}
-
 // ---------------------------------------------------------------------------
 // Firewall lock (netfilter modification)
 // ---------------------------------------------------------------------------

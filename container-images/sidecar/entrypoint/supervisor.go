@@ -188,10 +188,11 @@ func runSupervisor(notifFD int, protected map[string]bool, workdir string, allow
 			handleProtectedPathOp(&notif, &resp, pid, protected, notifFD, 1, int32(unix.EACCES), "unlinkat")
 		case int32(unix.SYS_SYMLINKAT):
 			handleProtectedPathOp(&notif, &resp, pid, protected, notifFD, 2, int32(unix.EACCES), "symlinkat")
+		// linkat/renameat2: args[1]=oldpath ptr, args[3]=newpath ptr (read inside checkDualPathProtected).
 		case int32(unix.SYS_LINKAT):
-			handleLinkat(&notif, &resp, pid, protected, notifFD)
+			checkDualPathProtected(&notif, &resp, pid, protected, notifFD, "linkat")
 		case int32(unix.SYS_RENAMEAT2):
-			handleRenameat2(&notif, &resp, pid, protected, notifFD)
+			checkDualPathProtected(&notif, &resp, pid, protected, notifFD, "renameat2")
 
 		// Firewall lock (netfilter modification).
 		case int32(unix.SYS_SETSOCKOPT):
