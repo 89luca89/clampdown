@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -30,13 +31,6 @@ const (
 	// sidecar and, by presence, into every nested container.
 	kvmDevice = "/dev/kvm"
 )
-
-func orDefault(override, def string) string {
-	if override != "" {
-		return override
-	}
-	return def
-}
 
 // LandlockPolicy matches the JSON expected by sandbox-seal.
 type LandlockPolicy struct {
@@ -74,7 +68,7 @@ func sidecarConfig(
 		AuthFile:       authFile,
 		Labels:         labels(session, "sidecar", ag, opts),
 		Name:           name,
-		Image:          orDefault(opts.SidecarImage, SidecarImage),
+		Image:          cmp.Or(opts.SidecarImage, SidecarImage),
 		Workdir:        opts.Workdir,
 		StorageVolume:  p.Storage,
 		CacheVolume:    p.Cache,
@@ -159,7 +153,7 @@ func agentConfig(
 
 	return container.AgentContainerConfig{
 		Name:           name,
-		Image:          orDefault(opts.AgentImage, ag.Image()),
+		Image:          cmp.Or(opts.AgentImage, ag.Image()),
 		Labels:         labels(session, "agent", ag, opts),
 		SidecarName:    sidecarName,
 		Workdir:        opts.Workdir,
@@ -660,7 +654,7 @@ func ProxyConfig(
 
 	return container.ProxyContainerConfig{
 		Name:           name,
-		Image:          orDefault(opts.ProxyImage, ProxyImage),
+		Image:          cmp.Or(opts.ProxyImage, ProxyImage),
 		Labels:         labels(session, "proxy", ag, opts),
 		SidecarName:    sidecarName,
 		Env:            env,

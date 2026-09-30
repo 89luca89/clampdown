@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -99,7 +100,7 @@ func Run(args []string) error {
 			},
 			&ucli.StringFlag{
 				Name:    "agent-policy",
-				Value:   defaultStr(cfg.AgentPolicy, "deny"),
+				Value:   cmp.Or(cfg.AgentPolicy, "deny"),
 				Sources: ucli.EnvVars("SANDBOX_AGENT_POLICY"),
 				Usage:   "Agent network policy (allow, deny)",
 			},
@@ -111,25 +112,25 @@ func Run(args []string) error {
 			},
 			&ucli.StringFlag{
 				Name:    "pod-policy",
-				Value:   defaultStr(cfg.PodPolicy, "allow"),
+				Value:   cmp.Or(cfg.PodPolicy, "allow"),
 				Sources: ucli.EnvVars("SANDBOX_POD_POLICY"),
 				Usage:   "Pod network policy (allow, deny)",
 			},
 			&ucli.StringFlag{
 				Name:    "require-digest",
-				Value:   defaultStr(cfg.RequireDigest, "warn"),
+				Value:   cmp.Or(cfg.RequireDigest, "warn"),
 				Sources: ucli.EnvVars("SANDBOX_REQUIRE_DIGEST"),
 				Usage:   "Image digest enforcement: warn (log tag-only pulls) or block (reject them)",
 			},
 			&ucli.StringFlag{
 				Name:    "memory",
-				Value:   defaultStr(cfg.Memory, "4g"),
+				Value:   cmp.Or(cfg.Memory, "4g"),
 				Sources: ucli.EnvVars("SANDBOX_MEMORY"),
 				Usage:   "Memory limit for containers (e.g. 4g, 8g)",
 			},
 			&ucli.IntFlag{
 				Name:    "cpus",
-				Value:   defaultInt(cfg.CPUs, 4),
+				Value:   cmp.Or(cfg.CPUs, 4),
 				Sources: ucli.EnvVars("SANDBOX_CPUS"),
 				Usage:   "CPU limit for containers (e.g. 4, 8)",
 			},
@@ -760,20 +761,6 @@ func prune(ctx context.Context, cmd *ucli.Command) error {
 	}
 	slog.Info("pruned project cache", "dir", dir)
 	return nil
-}
-
-func defaultStr(val, fallback string) string {
-	if val != "" {
-		return val
-	}
-	return fallback
-}
-
-func defaultInt(val, fallback int) int {
-	if val != 0 {
-		return val
-	}
-	return fallback
 }
 
 // resolveAgentImage picks the image for an agent: --agent-image CLI flag

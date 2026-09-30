@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -16,27 +17,19 @@ const AppName = "clampdown"
 // Resolved once at package init. All code uses these instead of os.Getenv.
 var (
 	Home      = os.Getenv("HOME")
-	CacheHome = envOrDefault("XDG_CACHE_HOME", filepath.Join(Home, ".cache"))
+	CacheHome = cmp.Or(os.Getenv("XDG_CACHE_HOME"), filepath.Join(Home, ".cache"))
 	ConfigDir = filepath.Join(
-		envOrDefault("XDG_CONFIG_HOME",
+		cmp.Or(os.Getenv("XDG_CONFIG_HOME"),
 			filepath.Join(Home,
 				".config")),
 		AppName)
 	DataDir = filepath.Join(
-		envOrDefault("XDG_DATA_HOME",
+		cmp.Or(os.Getenv("XDG_DATA_HOME"),
 			filepath.Join(Home,
 				".local",
 				"share")),
 		AppName)
 )
-
-func envOrDefault(key, fallback string) string {
-	v := os.Getenv(key)
-	if v != "" {
-		return v
-	}
-	return fallback
-}
 
 // ProjectPaths holds all computed directories for a sandbox run.
 type ProjectPaths struct {
