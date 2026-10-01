@@ -73,11 +73,6 @@ func parseMountInfo(path, workdir string) map[string]bool {
 		}
 		mountpoint := fields[4]
 
-		if mountpoint == "/proc/sys" {
-			protected[mountpoint] = true
-			continue
-		}
-
 		// Only workdir sub-mounts are interesting.
 		if workdir == "" || !isSubPath(workdir, mountpoint) || mountpoint == workdir {
 			continue

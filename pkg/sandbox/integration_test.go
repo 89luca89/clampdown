@@ -1799,3 +1799,99 @@ func TestSecurityAudit(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// New mount API (open_tree + move_mount) source allowlist: the new-API
+// counterpart to handleMount's MS_BIND source check.
+//
+// A reproducer that calls open_tree/move_mount as raw syscalls from a
+// nested container is NOT reachable from these tests — the canonical
+// workload seccomp profile ERRNOs both syscalls (seccomp_agent.json), and
+// seccomp=unconfined is rejected by checkSeccomp. The only process that
+// legitimately reaches handleOpenTree/handleMoveMount is crun itself when
+// it sets up a nested container's bind mounts; crun runs in the sidecar
+// PID NS where the sidecar's permissive seccomp lets the syscalls through
+// to the supervisor's notif filter. These tests exercise that path via
+// -v, which triggers crun's mount setup for the specified source.
+// ---------------------------------------------------------------------------
+
+func TestNewMountAPI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("run_bind_etc_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", "/etc:/mnt:ro"}, "true"))
+		requireFail(t, out, err)
+	})
+
+	t.Run("run_bind_proc_self_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", "/proc/self:/mnt:ro"}, "true"))
+		requireFail(t, out, err)
+	})
+
+	t.Run("run_bind_usr_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", "/usr:/mnt:ro"}, "true"))
+		requireFail(t, out, err)
+	})
+
+	t.Run("run_bind_workdir_allowed", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", workdir + ":" + workdir}, "ls", workdir))
+		requireSuccess(t, out, err)
+	})
+
+	t.Run("build_bind_proc_self_blocked", func(t *testing.T) {
+		t.Parallel()
+		cf := []byte("FROM " + alpineImage + "\nRUN true\n")
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/proc/self:/mnt:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	t.Run("supervisor_logged_source_block", func(t *testing.T) {
+		// Probe via `podman build`: the createRuntime hook catches `-v /etc`
+		// on `podman run` before crun calls mount, but buildah's RUN stage
+		// skips the precreate hook and crun's bind reaches the supervisor.
+		// Which handler fires is informational.
+		cf := []byte("FROM " + alpineImage + "\nRUN true\n")
+		_, _ = sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/etc:/mnt:ro",
+			"-f", "-",
+		}, cf, 120*time.Second)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		logs, err := rt.Logs(ctx, sidecarName)
+		if err != nil {
+			t.Fatalf("read sidecar logs: %v", err)
+		}
+		output := string(logs)
+
+		haveMount := strings.Contains(output, "BLOCKED mount(MS_BIND)") &&
+			strings.Contains(output, "source not allowed")
+		haveOpenTree := strings.Contains(output, "BLOCKED open_tree(CLONE)") &&
+			strings.Contains(output, "source not allowed")
+		haveMoveMount := strings.Contains(output, "BLOCKED move_mount") &&
+			strings.Contains(output, "source not allowed")
+
+		if !haveMount && !haveOpenTree && !haveMoveMount {
+			t.Fatal("expected supervisor to log a 'source not allowed' block from mount/open_tree/move_mount")
+		}
+		switch {
+		case haveOpenTree, haveMoveMount:
+			t.Logf("crun exercised the new mount API; new-API handler fired")
+		case haveMount:
+			t.Logf("crun exercised the legacy mount API; new-API handler is unit-tested only on this host")
+		}
+	})
+}

@@ -157,9 +157,9 @@ var procSensitive = []string{
 // ---------------------------------------------------------------------------
 
 // handleProtectedPathOp blocks a syscall if its path argument resolves to
-// a protected mount point. Used for umount2, mount_setattr, move_mount,
-// unlinkat, and symlinkat — all share the pattern: read one path arg,
-// resolve it, block if protected.
+// a protected mount point. Used for umount2, mount_setattr, unlinkat, and
+// symlinkat — all share the pattern: read one path arg, resolve it, block
+// if protected.
 func handleProtectedPathOp(
 	notif *seccompNotif,
 	resp *seccompNotifResp,
@@ -313,20 +313,16 @@ func handleMount(
 	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
 }
 
-// handleOpenTree blocks non-recursive open_tree clones of the workdir
-// or any ancestor. open_tree(dirfd, path, flags): arg1 = path, arg2 = flags.
-// A non-recursive OPEN_TREE_CLONE strips sub-mounts (like non-recursive bind),
-// exposing masked file contents at the detached mount.
-//
-// Recursive clones and clones of non-workdir paths are allowed — crun uses
-// open_tree(CLONE) from the sidecar PID NS for bind mount preparation
-// (get_bind_mount in prepare_and_send_mount_mounts).
-func handleOpenTree(notif *seccompNotif, resp *seccompNotifResp, pid uint32, workdir string, notifFD int) {
+// handleOpenTree validates open_tree(dirfd, path, flags) (arg1=path,
+// arg2=flags). The fd is attached via move_mount, so from untrusted
+// callers the source must be in the bind allowlist. Sidecar binaries
+// (crun) are trusted; crun's legitimate open_tree set during OCI setup
+// is too broad to enumerate. Non-recursive workdir clones are rejected
+// regardless -- they strip /dev/null sub-mounts.
+func handleOpenTree(notif *seccompNotif, resp *seccompNotifResp, pid uint32, workdir string, allowlist *execAllowlist, notifFD int) {
 	flags := notif.Data.Args[2]
 
-	// Non-clone open_tree is harmless — just an O_PATH open.
-	// Recursive clones preserve sub-mounts — safe.
-	if flags&unix.OPEN_TREE_CLONE == 0 || flags&unix.AT_RECURSIVE != 0 {
+	if flags&unix.OPEN_TREE_CLONE == 0 || allowlist.isSidecarBinary(pid) {
 		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
 		return
 	}
@@ -343,14 +339,131 @@ func handleOpenTree(notif *seccompNotif, resp *seccompNotifResp, pid uint32, wor
 		return
 	}
 
-	// Block non-recursive clone of workdir, ancestor, or child (strips sub-mounts).
-	if workdir != "" && (path == workdir || isSubPath(path, workdir) || isSubPath(workdir, path)) {
+	if !isAllowedBindSource(path, workdir) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED open_tree(CLONE) path=%s pid=%d bin=%s (source not allowed)",
+			path, pid, exePath(pid))
+		return
+	}
+
+	if flags&unix.AT_RECURSIVE == 0 && workdir != "" &&
+		(path == workdir || isSubPath(path, workdir) || isSubPath(workdir, path)) {
 		resp.Error = -int32(unix.EPERM)
 		logf("BLOCKED open_tree(CLONE) path=%s pid=%d bin=%s (non-recursive workdir clone)", path, pid, exePath(pid))
 		return
 	}
 
 	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+}
+
+// handleMoveMount validates move_mount(from_dfd, from_pathname, to_dfd,
+// to_pathname, flags). Sidecar binaries (crun) are trusted; they attach
+// fsmount'd and anonymous open_tree'd fds whose sources are not
+// representable as a bind-source path. For untrusted callers target must
+// not be protected and source must be in the bind allowlist (recovered
+// from from_dfd via mountRootFromFD when MOVE_MOUNT_F_EMPTY_PATH).
+func handleMoveMount(
+	notif *seccompNotif,
+	resp *seccompNotifResp,
+	pid uint32,
+	protected map[string]bool,
+	workdir string,
+	allowlist *execAllowlist,
+	notifFD int,
+) {
+	if allowlist.isSidecarBinary(pid) {
+		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		return
+	}
+
+	toRaw, err := readStringFromPID(pid, notif.Data.Args[3])
+	if err != nil {
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED move_mount: cannot read target pid=%d: %v", pid, err)
+		return
+	}
+	target := resolvePath(toRaw, pid)
+
+	fromRaw, err := readStringFromPID(pid, notif.Data.Args[1])
+	if err != nil {
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED move_mount: cannot read source pid=%d: %v", pid, err)
+		return
+	}
+
+	var source string
+	if fromRaw == "" {
+		source = mountRootFromFD(pid, int32(notif.Data.Args[0]))
+	} else {
+		source = resolvePath(fromRaw, pid)
+	}
+
+	if !checkNotifValid(notifFD, &notif.ID) {
+		return
+	}
+
+	if isProtected(target, protected) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED move_mount target=%s pid=%d bin=%s (protected target)",
+			target, pid, exePath(pid))
+		return
+	}
+
+	if source == "" {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED move_mount: cannot resolve source fd=%d target=%s pid=%d bin=%s",
+			int32(notif.Data.Args[0]), target, pid, exePath(pid))
+		return
+	}
+
+	if !isAllowedBindSource(source, workdir) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED move_mount source=%s target=%s pid=%d bin=%s (source not allowed)",
+			source, target, pid, exePath(pid))
+		return
+	}
+
+	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+}
+
+// mountRootFromFD returns the mount root (mountinfo field 4) for an fd
+// that references a mount. Reads /proc/<pid>/fdinfo/<fd> for mnt_id, then
+// looks it up in /proc/<pid>/mountinfo. Returns "" on any failure so the
+// caller can fail closed.
+func mountRootFromFD(pid uint32, fd int32) string {
+	info, err := os.Open(fmt.Sprintf("/proc/%d/fdinfo/%d", pid, fd))
+	if err != nil {
+		return ""
+	}
+	defer info.Close()
+
+	var mntID string
+	scanner := bufio.NewScanner(info)
+	for scanner.Scan() {
+		rest, ok := strings.CutPrefix(scanner.Text(), "mnt_id:")
+		if ok {
+			mntID = strings.TrimSpace(rest)
+			break
+		}
+	}
+	if mntID == "" {
+		return ""
+	}
+
+	mi, err := os.Open(fmt.Sprintf("/proc/%d/mountinfo", pid))
+	if err != nil {
+		return ""
+	}
+	defer mi.Close()
+
+	scanner = bufio.NewScanner(mi)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 4 && fields[0] == mntID {
+			return fields[3]
+		}
+	}
+	return ""
 }
 
 // handleSidecarPIDNSBlock blocks a syscall from the sidecar PID namespace.

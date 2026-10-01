@@ -707,3 +707,36 @@ func TestIsShallowInfraBindSource(t *testing.T) {
 		}
 	}
 }
+
+func TestMountRootFromFD_Valid(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "f")
+	err := os.WriteFile(path, nil, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	got := mountRootFromFD(uint32(os.Getpid()), int32(f.Fd()))
+	if got == "" {
+		t.Error("expected non-empty mount root for a valid fd")
+	}
+}
+
+func TestMountRootFromFD_BadFD(t *testing.T) {
+	got := mountRootFromFD(uint32(os.Getpid()), 999999)
+	if got != "" {
+		t.Errorf("mountRootFromFD(badfd) = %q, want \"\"", got)
+	}
+}
+
+func TestMountRootFromFD_BadPID(t *testing.T) {
+	got := mountRootFromFD(99999999, 0)
+	if got != "" {
+		t.Errorf("mountRootFromFD(badpid) = %q, want \"\"", got)
+	}
+}

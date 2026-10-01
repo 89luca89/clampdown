@@ -161,9 +161,9 @@ func runSupervisor(notifFD int, protected map[string]bool, workdir string, allow
 		case int32(unix.SYS_MOUNT_SETATTR):
 			handleProtectedPathOp(&notif, &resp, pid, protected, notifFD, 1, int32(unix.EPERM), "mount_setattr")
 		case int32(unix.SYS_MOVE_MOUNT):
-			handleProtectedPathOp(&notif, &resp, pid, protected, notifFD, 3, int32(unix.EPERM), "move_mount")
+			handleMoveMount(&notif, &resp, pid, protected, workdir, allowlist, notifFD)
 		case int32(unix.SYS_OPEN_TREE):
-			handleOpenTree(&notif, &resp, pid, workdir, notifFD)
+			handleOpenTree(&notif, &resp, pid, workdir, allowlist, notifFD)
 		case int32(unix.SYS_FSOPEN):
 			handleSidecarPIDNSBlock(&notif, &resp, pid, myPIDNS, notifFD, "fsopen")
 		case int32(unix.SYS_FSCONFIG):

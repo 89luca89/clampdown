@@ -30,6 +30,22 @@ type execAllowlist struct {
 	entries map[string]execEntry
 }
 
+// isSidecarBinary reports whether pid's running executable (verified by
+// dev+ino of /proc/<pid>/exe against the startup snapshot) is one of the
+// sidecar's own binaries. A container process with a same-named binary
+// on its own rootfs resolves to a different device/inode and is rejected.
+func (al *execAllowlist) isSidecarBinary(pid uint32) bool {
+	entry, ok := al.entries[exePath(pid)]
+	if !ok {
+		return false
+	}
+	var st unix.Stat_t
+	if unix.Stat(fmt.Sprintf("/proc/%d/exe", pid), &st) != nil {
+		return false
+	}
+	return st.Dev == entry.Dev && st.Ino == entry.Ino
+}
+
 // check verifies an exec path against the allowlist.
 //
 // Fast path: stat the file, compare (dev, ino, size, mtime) against
