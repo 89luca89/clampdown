@@ -29,7 +29,7 @@ RUN tar xz --strip-components=1 -f podman-linux-"${TARGETARCH}".tar.gz -C / \
              /etc/containers/storage.conf.d/00-podman-static.conf \
              /podman-linux-${TARGETARCH}.tar.gz
 
-# extract iptables from alpine and
+# extract iptables + nftables from alpine.
 FROM alpine:3.23 AS iptables
 RUN mkdir /iptables && apk add --initdb --root /iptables \
     --no-cache --no-scripts \
@@ -37,6 +37,7 @@ RUN mkdir /iptables && apk add --initdb --root /iptables \
     --repositories-file /etc/apk/repositories \
     ca-certificates-bundle \
     iptables \
+    nftables \
 # Cleanup iptables rootfs — strip shells, package manager, docs
     && rm -rf /iptables/bin \
               /iptables/var \
