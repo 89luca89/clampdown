@@ -54,6 +54,13 @@ var UniversalMaskedPaths = []agent.MaskedPath{
 	{Path: ".envrc"},
 	{Path: ".npmrc"},
 	{Path: ".clampdownrc"},
+	{Path: ".aws", IsDir: true},
+	{Path: ".kube", IsDir: true},
+	{Path: ".docker/config.json"},
+	{Path: ".netrc"},
+	{Path: ".pgpass"},
+	{Path: ".pypirc"},
+	{Path: ".cargo/credentials.toml"},
 }
 
 // MergeProtection returns the universal protected paths, removing .git/hooks

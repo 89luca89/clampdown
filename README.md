@@ -415,10 +415,11 @@ paths get the same treatment. Protected paths propagate into nested
 containers via recursive bind, and explicit RW re-mounts are blocked by
 the security-policy hook.
 
-Masked paths (`.env`, `.envrc`, `.npmrc`, `.clampdownrc`) are hidden
-unconditionally with `/dev/null` for files or an empty bind for
-directories, whether the path is present or not. The path appears to
-exist but reads return empty.
+Masked paths (`.env`, `.envrc`, `.npmrc`, `.clampdownrc`, `.aws/`,
+`.kube/`, `.docker/config.json`, `.netrc`, `.pgpass`, `.pypirc`,
+`.cargo/credentials.toml`) are hidden unconditionally with `/dev/null`
+for files or an empty bind for directories, whether the path is present
+or not. The path appears to exist but reads return empty.
 
 Use `--unmask` to selectively restore access (for example `--unmask .env`
 for projects that need it). Persistent via `config.json`:

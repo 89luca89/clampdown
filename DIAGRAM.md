@@ -114,7 +114,9 @@
 │  │                                                                  │    │
 │  │  API keys: sk-proxy (dummy), BASE_URL=http://localhost:2376      │    │
 │  │  Protected paths: .git/hooks, .mcp.json, etc. (RO)               │    │
-│  │  Masked paths: .env, .envrc, .npmrc, .clampdownrc (/dev/null)    │    │
+│  │  Masked paths: .env, .envrc, .npmrc, .clampdownrc, .aws/, .kube/,│    │
+│  │    .docker/config.json, .netrc, .pgpass, .pypirc,                │    │
+│  │    .cargo/credentials.toml                                       │    │
 │  │  Inter-container comm: podman networks (not -p port publishing)  │    │
 │  └──────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -650,8 +652,10 @@ All tiers include Refer (prevents EXDEV). MakeChar/MakeBlock excluded.
 Two categories are applied to the workdir, distinct from the system-wide
 masks below. Masked paths (`UniversalMaskedPaths`) use a `/dev/null` bind
 for files and an empty bind for directories, applied unconditionally
-whether present or not. Defaults are `.env`, `.envrc`, `.npmrc`, and
-`.clampdownrc`. Protected paths (`UniversalProtectedPaths`) are read-only
+whether present or not. Defaults are `.env`, `.envrc`, `.npmrc`,
+`.clampdownrc`, `.aws/`, `.kube/`, `.docker/config.json`, `.netrc`,
+`.pgpass`, `.pypirc`, and `.cargo/credentials.toml`. Protected paths
+(`UniversalProtectedPaths`) are read-only
 binds if present. Absent files become `/dev/null`, and absent directories
 become an empty read-only bind. Materialization at session start prevents
 host writes from leaking through during the session. Defaults are

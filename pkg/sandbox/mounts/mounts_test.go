@@ -72,8 +72,20 @@ func TestUniversalProtectedPaths_ExcludesCodexConfig(t *testing.T) {
 }
 
 func TestUniversalMaskedPaths_IncludesExpected(t *testing.T) {
-	want := map[string]bool{".env": false, ".envrc": false, ".clampdownrc": false}
+	want := map[string]bool{
+		".env": false, ".envrc": false, ".npmrc": false, ".clampdownrc": false,
+		".aws": true, ".kube": true,
+		".docker/config.json": false, ".netrc": false, ".pgpass": false,
+		".pypirc": false, ".cargo/credentials.toml": false,
+	}
 	for _, m := range mounts.UniversalMaskedPaths {
+		isDir, ok := want[m.Path]
+		if !ok {
+			continue
+		}
+		if m.IsDir != isDir {
+			t.Errorf("%s IsDir=%v, want %v", m.Path, m.IsDir, isDir)
+		}
 		delete(want, m.Path)
 	}
 	for path := range want {

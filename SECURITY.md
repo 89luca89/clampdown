@@ -35,7 +35,9 @@ For a complete description of all defense layers, see [`DIAGRAM.md`](DIAGRAM.md)
 Two categories of workdir paths are enforced uniformly across the agent
 and nested containers. Masked paths (`UniversalMaskedPaths`) hide content
 unconditionally with a `/dev/null` bind for files or an empty bind for
-directories. Defaults are `.env`, `.envrc`, `.npmrc`, and `.clampdownrc`.
+directories. Defaults are `.env`, `.envrc`, `.npmrc`, `.clampdownrc`,
+`.aws/`, `.kube/`, `.docker/config.json`, `.netrc`, `.pgpass`,
+`.pypirc`, and `.cargo/credentials.toml`.
 Protected paths (`UniversalProtectedPaths`) are read-only binds if
 present. If absent at session start they are materialized as `/dev/null`
 for files or an empty read-only bind for directories so content cannot
