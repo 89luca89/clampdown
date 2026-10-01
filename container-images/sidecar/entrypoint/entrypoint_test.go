@@ -651,3 +651,59 @@ func TestIsAllowedBindSource(t *testing.T) {
 		}
 	}
 }
+
+// Guards against podman build --volume /var/lib/containers/storage:/x
+// binding the sidecar storage tree into a build RUN step. The
+// classifier must flag every shallow infra path and leave ID-scoped
+// sub-paths alone (legitimate rootfs and userdata binds use
+// overlay/<layer>/merged and overlay-containers/<CID>/userdata/*).
+func TestIsShallowInfraBindSource(t *testing.T) {
+	tests := []struct {
+		source string
+		want   bool
+	}{
+		// Shallow infra paths — attack vectors.
+		{"/run/containers", true},
+		{"/var/cache/containers", true},
+		{"/var/lib/containers/storage", true},
+		{"/var/lib/containers/storage/libpod", true},
+		{"/var/lib/containers/storage/overlay", true},
+		{"/var/lib/containers/storage/overlay-containers", true},
+		{"/var/lib/containers/storage/overlay-images", true},
+		{"/var/lib/containers/storage/overlay-layers", true},
+		{"/var/lib/containers/storage/volumes", true},
+		{"/var/run/containers/storage", true},
+		{"/var/run/containers/storage/overlay", true},
+		{"/var/run/containers/storage/overlay-containers", true},
+
+		// ID-scoped sub-paths — legitimate OCI runtime binds. These
+		// must not trigger the block or every build RUN step dies on
+		// rootfs setup.
+		{"/var/lib/containers/storage/overlay/abc123/merged", false},
+		{"/var/lib/containers/storage/overlay-containers/abc/userdata/hosts", false},
+		{"/var/lib/containers/storage/volumes/myvol/_data", false},
+		{"/var/run/containers/storage/overlay-containers/abc", false},
+		{"/run/containers/storage/abc", false},
+		{"/var/cache/containers/blob-cache/sha256/abc", false},
+
+		// Other legitimate bind sources — unrelated prefixes.
+		{"/run/credentials/gh", false},
+		{"/var/tmp/buildah123", false},
+		{"/proc/self", false},
+		{"/dev/null", false},
+		{"/sandbox-seal", false},
+		{"/home/user/project", false},
+
+		// Negatives.
+		{"", false},
+		{"/", false},
+		{"/etc", false},
+		{"/usr", false},
+	}
+	for _, tt := range tests {
+		got := isShallowInfraBindSource(tt.source)
+		if got != tt.want {
+			t.Errorf("isShallowInfraBindSource(%q) = %v, want %v", tt.source, got, tt.want)
+		}
+	}
+}

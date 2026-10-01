@@ -1489,6 +1489,44 @@ func TestRootfsTampering(t *testing.T) {
 			innerRun([]string{"-v", workdir + ":/work"}, "ls", "/work"))
 		requireSuccess(t, out, err)
 	})
+
+	// Binding infra storage at build time hands R+W to sidecar container
+	// storage. handleMount's shallow-infra-source check in the supervisor
+	// blocks the exact paths that have no legitimate use as a bind
+	// source (/var/lib/containers/storage and friends). Legitimate
+	// rootfs and userdata binds use deeper, ID-scoped sub-paths and are
+	// untouched.
+	t.Run("build_bind_storage_blocked", func(t *testing.T) {
+		t.Parallel()
+		cf := "FROM " + alpineImage + "\nRUN ls /storage\n"
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/var/lib/containers/storage:/storage",
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	t.Run("build_bind_run_storage_blocked", func(t *testing.T) {
+		t.Parallel()
+		cf := "FROM " + alpineImage + "\nRUN ls /storage\n"
+		out, err := sidecarExecStdinTimeout(t, sidecarName, []string{
+			innerPodman, "build", "--no-cache",
+			"-v", "/var/run/containers/storage:/storage",
+			"-f", "-",
+		}, []byte(cf), 120*time.Second)
+		requireFail(t, out, err)
+	})
+
+	// Same source via `podman run`. The OCI hook already rejects storage
+	// bind sources at createRuntime; this subtest covers the supervisor
+	// path too so defence-in-depth is explicit.
+	t.Run("run_bind_storage_blocked", func(t *testing.T) {
+		t.Parallel()
+		out, err := sidecarExec(t, sidecarName,
+			innerRun([]string{"-v", "/var/lib/containers/storage:/storage"}, "ls", "/storage"))
+		requireFail(t, out, err)
+	})
 }
 
 // ---------------------------------------------------------------------------

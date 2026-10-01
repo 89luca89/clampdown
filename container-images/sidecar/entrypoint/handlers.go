@@ -43,6 +43,36 @@ var allowedBindSources = []string{
 	"/run/credentials",
 }
 
+// shallowInfraBindSources lists infra storage/cache paths that have no
+// legitimate use as an MS_BIND source: binding any of them into a
+// nested container hands R+W access to the sidecar's container-storage
+// tree (e.g. `podman build --volume /var/lib/containers/storage:/x`).
+// The OCI runtime only binds deeper, ID-scoped paths
+// (overlay/<layer>/merged for rootfs, overlay-containers/<CID>/userdata/*
+// for /etc/hosts and friends), so exact-matching these shallow paths
+// blocks the escape without touching legitimate container setup.
+var shallowInfraBindSources = map[string]bool{
+	"/run/containers":                                   true,
+	"/var/cache/containers":                             true,
+	"/var/lib/containers/storage":                       true,
+	"/var/lib/containers/storage/libpod":                true,
+	"/var/lib/containers/storage/overlay":               true,
+	"/var/lib/containers/storage/overlay-containers":    true,
+	"/var/lib/containers/storage/overlay-images":        true,
+	"/var/lib/containers/storage/overlay-layers":        true,
+	"/var/lib/containers/storage/volumes":               true,
+	"/var/run/containers/storage":                       true,
+	"/var/run/containers/storage/overlay":               true,
+	"/var/run/containers/storage/overlay-containers":    true,
+}
+
+// isShallowInfraBindSource reports whether a bind source matches one of
+// the shallow infra paths that must never be bound into a nested
+// container.
+func isShallowInfraBindSource(source string) bool {
+	return shallowInfraBindSources[source]
+}
+
 // allowedBindSourceFiles lists individual rootfs files that may be
 // bind-mounted into nested containers.
 var allowedBindSourceFiles = []string{
@@ -229,6 +259,25 @@ func handleMount(
 	if flags&unix.MS_BIND != 0 && flags&unix.MS_REMOUNT == 0 && !isAllowedBindSource(source, workdir) {
 		resp.Error = -int32(unix.EPERM)
 		logf("BLOCKED mount(MS_BIND) source=%s target=%s pid=%d bin=%s (source not allowed)",
+			source, target, pid, exePath(pid))
+		return
+	}
+
+	// Block bind mounts whose source is a shallow infra storage/cache
+	// path AND whose target differs from the source. Podman self-binds
+	// paths like /var/lib/containers/storage/overlay onto themselves at
+	// startup (same source and target) to pin the subtree as a mount
+	// point before changing propagation — these must pass. A buildah
+	// --volume of the same source always sets target to a path inside
+	// the nested container's rootfs (crun's prep path), so source !=
+	// target reliably separates attack from self-bind. Legitimate
+	// OCI-runtime binds use ID-scoped sub-paths (overlay/<layer>/merged,
+	// overlay-containers/<CID>/userdata/*) that are not in the shallow
+	// list and pass regardless.
+	if flags&unix.MS_BIND != 0 && flags&unix.MS_REMOUNT == 0 &&
+		source != target && isShallowInfraBindSource(source) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED mount(MS_BIND) source=%s target=%s pid=%d bin=%s (shallow infra storage bound to different target)",
 			source, target, pid, exePath(pid))
 		return
 	}
@@ -522,10 +571,13 @@ func checkDualPathProtected(
 
 // netfilterBin is the only binary that legitimately calls netfilter APIs.
 // All iptables symlinks resolve to this binary.
-const netfilterBin = "/usr/sbin/xtables-nft-multi"
+var netfilterBins = []string{
+	"/usr/sbin/xtables-nft-multi",
+	"/usr/sbin/nft",
+}
 
 // netfilterParent is the only allowed parent for netfilter operations.
-// netavark is podman's network manager — it exec's xtables-nft-multi
+// netavark is podman's network manager — it exec's one of netfilterBins
 // to configure per-container bridge rules. It does not expose a CLI
 // for arbitrary rule manipulation.
 const netfilterParent = "/usr/local/lib/podman/netavark"
@@ -557,13 +609,13 @@ func readPPID(pid uint32) uint32 {
 	return 0
 }
 
-// isNetfilterAllowed checks whether a process is xtables-nft-multi
+// isNetfilterAllowed checks whether a process is one of netfilterBins
 // spawned by netavark. This is the only legitimate path for netfilter
-// modification inside the sidecar. The caller (xtables) is blocked
-// waiting for the supervisor, so neither it nor its parent (netavark,
-// waiting for the child) can exit during this check — no PID reuse race.
+// modification inside the sidecar. The caller is blocked waiting for
+// the supervisor, so neither it nor its parent (netavark, waiting for
+// the child) can exit during this check — no PID reuse race.
 func isNetfilterAllowed(pid uint32) bool {
-	if exePath(pid) != netfilterBin {
+	if !slices.Contains(netfilterBins, exePath(pid)) {
 		return false
 	}
 	ppid := readPPID(pid)
@@ -574,7 +626,7 @@ func isNetfilterAllowed(pid uint32) bool {
 }
 
 // handleSetsockopt blocks IPT_SO_SET_REPLACE for sidecar processes
-// unless the caller is xtables-nft-multi spawned by netavark.
+// unless the caller is a netfilterBins entry spawned by netavark.
 // Legitimate firewall changes from the host arrive via `podman exec`,
 // which does NOT inherit the seccomp-notif filter (setns, not fork).
 // Integer args only — zero TOCTOU.
@@ -617,9 +669,9 @@ func handleSetsockopt(
 }
 
 // handleSocket blocks creation of NETLINK_NETFILTER sockets for sidecar
-// processes unless the caller is xtables-nft-multi spawned by netavark.
-// Legitimate firewall changes from the host arrive via `podman exec`,
-// which does NOT inherit the seccomp-notif filter.
+// processes unless the caller is a netfilterBins entry spawned by
+// netavark. Legitimate firewall changes from the host arrive via
+// `podman exec`, which does NOT inherit the seccomp-notif filter.
 // Integer args only — zero TOCTOU.
 //
 //	socket(domain, type, protocol)
