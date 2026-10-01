@@ -620,9 +620,10 @@ func warnIfRootful(ctx context.Context, rt container.Runtime) {
 		rt.Name())
 }
 
-// runPreflightChecks runs host kernel safety checks (Landlock, Yama).
-// Skipped when the container daemon runs on a different kernel (VM, remote),
-// since host kernel state is irrelevant in that case.
+// runPreflightChecks runs host kernel safety checks (Landlock LSM availability
+// and the /proc/sys/* table in checkKernelSysctls). Skipped when the container
+// daemon runs on a different kernel (VM, remote), since host kernel state is
+// irrelevant in that case.
 func runPreflightChecks(ctx context.Context, rt container.Runtime) error {
 	if rt.IsDockerDesktop(ctx) {
 		fmt.Fprintf(os.Stderr, "\n"+
@@ -649,7 +650,7 @@ func runPreflightChecks(ctx context.Context, rt container.Runtime) error {
 		return err
 	}
 
-	return checkYama()
+	return checkKernelSysctls()
 }
 
 // CheckLandlock verifies Landlock LSM is available on the host kernel.
@@ -696,44 +697,110 @@ func kernelVersion() (int, int) {
 	return major, minor
 }
 
-// checkYama warns if Yama LSM ptrace_scope is 0 (permissive).
-//
-// ptrace is blocked by seccomp in workload profiles, but Yama is an
-// independent enforcement point in a different kernel subsystem.
-// If an attacker bypasses seccomp (kernel bug), Yama scope >= 1
-// still restricts ptrace to descendants only.
-//
-// Advisory only — never blocks startup.
-func checkYama() error {
-	scope, err := os.ReadFile("/proc/sys/kernel/yama/ptrace_scope")
+// yamaScope3Message explains why yama ptrace_scope=3 is incompatible with the
+// seccomp-notif supervisor. Kept as a const so the evalSysctl switch stays
+// readable; the message is long because the condition is specific and the fix
+// (sysctl.conf plus reboot — yama=3 is write-once) is non-obvious.
+const yamaScope3Message = "/proc/sys/kernel/yama/ptrace_scope=3 (no-attach) is incompatible with the seccomp-notif supervisor.\n" +
+	"  The supervisor reads syscall arguments from /proc/<pid>/mem, which requires ptrace access.\n" +
+	"  yama=3 blocks ALL cross-process memory reads — even with CAP_SYS_PTRACE — which disables\n" +
+	"  the supervisor's path-based security checks (bind source allowlist, exec allowlist,\n" +
+	"  protected paths, firewall lock).\n" +
+	"  Set ptrace_scope to 1 (relational, recommended) or 2 (capability). yama=3 is write-once,\n" +
+	"  so if already set, a reboot with kernel.yama.ptrace_scope=1 in sysctl.conf is required."
+
+// kernelSysctlPaths lists the host /proc/sys entries evalSysctl inspects at
+// startup. Order controls the warning output and the failed-list in the
+// returned error; the audit section of README.md documents the full set.
+var kernelSysctlPaths = []string{
+	"/proc/sys/kernel/dmesg_restrict",
+	"/proc/sys/kernel/kptr_restrict",
+	"/proc/sys/kernel/perf_event_paranoid",
+	"/proc/sys/kernel/unprivileged_bpf_disabled",
+	"/proc/sys/kernel/yama/ptrace_scope",
+	"/proc/sys/vm/unprivileged_userfaultfd",
+}
+
+// evalSysctl applies the per-sysctl safe-value rule. Pure: returns ok and the
+// full warning text to print when the value is unsafe. raw is the sysctl file
+// contents (trailing whitespace tolerated). An unparseable integer counts as
+// unsafe — if the kernel ever hands back garbage for a path we check, fail
+// closed rather than silently assume the safe value.
+func evalSysctl(name, raw string) (bool, string) {
+	val := strings.TrimSpace(raw)
+	var n int
+	_, err := fmt.Sscanf(val, "%d", &n)
 	if err != nil {
-		// Yama not present or /proc not accessible.
-		fmt.Fprintf(os.Stderr, "\n"+
-			"  ⚠️  Yama LSM not detected (/proc/sys/kernel/yama/ptrace_scope unreadable).\n"+
-			"  ptrace is blocked by seccomp, but Yama provides independent\n"+
-			"  defense-in-depth against ptrace-based escapes.\n"+
-			"  Enable Yama: boot with lsm=...,yama or set CONFIG_SECURITY_YAMA=y.\n\n")
-		return nil //nolint:nilerr // advisory only, never blocks startup
+		return false, fmt.Sprintf("%s is %q, cannot parse as integer", name, val)
 	}
 
-	val := strings.TrimSpace(string(scope))
-
-	if val == "3" {
-		fmt.Fprintf(os.Stderr, "\n"+
-			"  yama ptrace_scope is 3 (no-attach).\n"+
-			"  The seccomp-notif supervisor reads syscall arguments from\n"+
-			"  /proc/<pid>/mem, which requires ptrace access. yama=3 blocks\n"+
-			"  ALL cross-process memory reads — even with CAP_SYS_PTRACE.\n"+
-			"  This disables the supervisor's path-based security checks\n"+
-			"  (bind source allowlist, exec allowlist, protected paths, firewall lock).\n\n"+
-			"  Set ptrace_scope to 1 or 2:\n"+
-			"    echo 1 > /proc/sys/kernel/yama/ptrace_scope   (relational — parent can trace children)\n"+
-			"    echo 2 > /proc/sys/kernel/yama/ptrace_scope   (capability — requires CAP_SYS_PTRACE)\n\n"+
-			"  Both are compatible with clampdown. yama=1 is the recommended default.\n"+
-			"  Note: yama=3 is write-once — if already set, a reboot with\n"+
-			"  kernel.yama.ptrace_scope=1 in sysctl.conf is required.\n\n")
-		return errors.New("yama ptrace_scope=3 is incompatible with the seccomp-notif supervisor (see above)")
+	switch name {
+	case "/proc/sys/vm/unprivileged_userfaultfd":
+		if n == 0 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 0). userfaultfd is a core "+
+			"use-after-free primitive; unprivileged tasks must not register one.", name, n)
+	case "/proc/sys/kernel/unprivileged_bpf_disabled":
+		if n == 1 || n == 2 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 1 or 2). Unprivileged BPF "+
+			"has produced many LPEs; disable it (=1) or lock it (=2).", name, n)
+	case "/proc/sys/kernel/kptr_restrict":
+		if n >= 1 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 1 or 2). kptr_restrict=0 "+
+			"leaks kernel pointers in /proc and dmesg, defeating KASLR.", name, n)
+	case "/proc/sys/kernel/dmesg_restrict":
+		if n == 1 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 1). dmesg_restrict=0 leaves "+
+			"dmesg world-readable and leaks kernel addresses.", name, n)
+	case "/proc/sys/kernel/perf_event_paranoid":
+		if n >= 2 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 2 or higher). perf_event_open "+
+			"has a long CVE history; <2 lets unprivileged tasks instrument "+
+			"hardware counters.", name, n)
+	case "/proc/sys/kernel/yama/ptrace_scope":
+		if n == 3 {
+			return false, yamaScope3Message
+		}
+		if n >= 1 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s=%d (safe: 1 or 2). ptrace_scope=0 lets "+
+			"any process trace any other.", name, n)
 	}
+	return true, ""
+}
 
-	return nil
+// checkKernelSysctls walks kernelSysctlPaths, reads each file, and prints an
+// advisory block for every unsafe value. Returns an error naming the failing
+// sysctls so the session refuses to start. Missing files (older kernel, feature
+// not compiled in) and unreadable files are silent skips: a sysctl that
+// doesn't exist on this host contributes no exploit surface here.
+func checkKernelSysctls() error {
+	var failed []string
+	for _, path := range kernelSysctlPaths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		ok, msg := evalSysctl(path, string(raw))
+		if ok {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "\n  ⚠️  %s\n\n", msg)
+		failed = append(failed, path)
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("kernel sysctl check failed for: %s (see warnings above)",
+		strings.Join(failed, ", "))
 }

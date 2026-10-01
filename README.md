@@ -245,6 +245,28 @@ Verify Landlock is active (Linux or inside the VM):
 cat /sys/kernel/security/lsm   # must contain "landlock"
 ```
 
+### Kernel sysctls
+
+The launcher refuses to start if the host kernel has permissive values for
+sysctls that widen the residual kernel-bug surface seccomp cannot cover
+(futex UAF, mm class, info leaks that defeat KASLR). Each unsafe value
+prints the sysctl, the current value, the safe value, and the reason;
+startup then exits non-zero.
+
+| Sysctl | Safe value | Why |
+|--------|-----------|-----|
+| `vm.unprivileged_userfaultfd` | `0` | userfaultfd is a core use-after-free primitive. |
+| `kernel.unprivileged_bpf_disabled` | `1` or `2` | Unprivileged BPF has produced many LPEs. `2` is write-once. |
+| `kernel.kptr_restrict` | `>= 1` | `0` leaks kernel pointers in `/proc` and dmesg, defeating KASLR. |
+| `kernel.dmesg_restrict` | `1` | `0` leaves dmesg world-readable and leaks kernel addresses. |
+| `kernel.perf_event_paranoid` | `>= 2` | `< 2` lets unprivileged tasks instrument hardware counters. |
+| `kernel.yama.ptrace_scope` | `1` or `2` | `0` lets any process trace any other. `3` (no-attach) is also refused: the seccomp-notif supervisor needs ptrace to read syscall args from `/proc/<pid>/mem`, and `3` blocks that even with `CAP_SYS_PTRACE`. |
+
+Missing files are a silent skip: a sysctl that doesn't exist on this kernel
+contributes no surface here. To set safe defaults persistently, add the
+entries to `/etc/sysctl.conf` (or `/etc/sysctl.d/*.conf`) and run
+`sysctl --system`.
+
 ---
 
 ## Install
