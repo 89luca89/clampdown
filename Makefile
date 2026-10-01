@@ -4,7 +4,7 @@ GOARCH   ?= $(shell go env GOARCH)
 REGISTRY ?=
 TAG      ?= latest
 PLATFORM ?= linux/$(GOARCH)
-PODMAN_VERSION   ?= v5.8.2
+PODMAN_VERSION   ?= v6.1.3
 
 SIDECAR_IMAGE  := clampdown-sidecar:latest
 CLAUDE_IMAGE   := clampdown-claude:latest
