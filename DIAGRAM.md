@@ -695,10 +695,11 @@ files.
 | /sys/module | dir | nested | Kernel module parameters |
 | /sys/devices/virtual/dmi | dir | nested | Hardware fingerprint |
 
-\* "all" = agent, sidecar, proxy (via `hardenedMounts` in config.go) +
-nested containers (via containers.conf volumes). "nested" = nested
-containers only (EmptyRO tmpfs via containers.conf; not applied to
-agent/sidecar/proxy due to sysfs mount constraints).
+\* "all" = agent (via `AgentHardenedMounts` in pkg/sandbox/config.go),
+sidecar (via `maskSensitivePaths` in entrypoint/protect.go), and nested
+containers (via containers.conf volumes). Not applied to the proxy.
+"nested" = nested containers only (EmptyRO tmpfs via containers.conf;
+not applied to agent/sidecar due to sysfs mount constraints).
 
 ### File provenance
 

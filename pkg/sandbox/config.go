@@ -32,6 +32,22 @@ const (
 	kvmDevice = "/dev/kvm"
 )
 
+// AgentHardenedMounts masks /proc and /sys files that leak host info or
+// aid kernel exploit development. Mirrors the file-mask subset of
+// container-images/sidecar/containers.conf used for nested containers.
+var AgentHardenedMounts = []container.MountSpec{
+	{Dest: "/proc/cmdline", Type: container.DevNull},
+	{Dest: "/proc/devices", Type: container.DevNull},
+	{Dest: "/proc/diskstats", Type: container.DevNull},
+	{Dest: "/proc/kallsyms", Type: container.DevNull},
+	{Dest: "/proc/kcore", Type: container.DevNull},
+	{Dest: "/proc/modules", Type: container.DevNull},
+	{Dest: "/proc/partitions", Type: container.DevNull},
+	{Dest: "/proc/sysrq-trigger", Type: container.DevNull},
+	{Dest: "/proc/version", Type: container.DevNull},
+	{Dest: "/sys/kernel/vmcoreinfo", Type: container.DevNull},
+}
+
 // LandlockPolicy matches the JSON expected by sandbox-seal.
 type LandlockPolicy struct {
 	ReadExec    []string `json:"read_exec"`
@@ -158,6 +174,7 @@ func agentConfig(
 		SidecarName:    sidecarName,
 		Workdir:        opts.Workdir,
 		Mounts:         allMounts,
+		MaskedPaths:    AgentHardenedMounts,
 		SeccompProfile: seccompPath,
 		Resources: container.Resources{
 			Memory: opts.Memory, CPUs: opts.CPUs,

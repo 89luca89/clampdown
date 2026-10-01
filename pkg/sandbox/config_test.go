@@ -116,6 +116,27 @@ func TestAgentLandlockPolicy_WithConnectTCP(t *testing.T) {
 	}
 }
 
+func TestAgentHardenedMounts_CoversLeakyPaths(t *testing.T) {
+	want := []string{
+		"/proc/cmdline", "/proc/diskstats", "/proc/kallsyms",
+		"/proc/kcore", "/proc/version", "/sys/kernel/vmcoreinfo",
+	}
+	have := make(map[string]container.MountType, len(sandbox.AgentHardenedMounts))
+	for _, m := range sandbox.AgentHardenedMounts {
+		have[m.Dest] = m.Type
+	}
+	for _, p := range want {
+		typ, ok := have[p]
+		if !ok {
+			t.Errorf("AgentHardenedMounts missing %s", p)
+			continue
+		}
+		if typ != container.DevNull {
+			t.Errorf("%s: type=%v, want DevNull", p, typ)
+		}
+	}
+}
+
 func TestSidecarProtectedPaths_ExistingDir(t *testing.T) {
 	workdir := t.TempDir()
 	err := os.MkdirAll(filepath.Join(workdir, ".git", "hooks"), 0o750)
