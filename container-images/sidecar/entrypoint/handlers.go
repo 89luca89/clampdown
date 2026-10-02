@@ -106,6 +106,22 @@ func isAllowedBindSource(source, workdir string) bool {
 	return slices.Contains(allowedBindSourceFiles, source)
 }
 
+func allowedOverlayLowerdir(path, workdir string) bool {
+	return path != "" && isAllowedBindSource(path, workdir) && !isShallowInfraBindSource(path)
+}
+
+func parseOverlayLowerdirs(options []string) []string {
+	var lower []string
+	for _, opt := range options {
+		v, ok := strings.CutPrefix(opt, "lowerdir=")
+		if !ok {
+			continue
+		}
+		lower = append(lower, strings.Split(v, ":")...)
+	}
+	return lower
+}
+
 // allowedFsTypes lists filesystem types permitted for non-bind mounts
 // from the sidecar PID namespace. crun only uses these types during
 // container setup.
@@ -243,6 +259,17 @@ func handleMount(
 		}
 	}
 
+	isOverlay := fstype == "overlay" && flags&unix.MS_BIND == 0 && flags&unix.MS_REMOUNT == 0
+	var data string
+	if isOverlay && notif.Data.Args[4] != 0 {
+		data, err = readStringFromPID(pid, notif.Data.Args[4])
+		if err != nil {
+			resp.Error = -syscallErrno(err)
+			logf("BLOCKED mount: cannot read data pid=%d: %v", pid, err)
+			return
+		}
+	}
+
 	if !checkNotifValid(notifFD, &notif.ID) {
 		return
 	}
@@ -308,6 +335,17 @@ func handleMount(
 		logf("BLOCKED mount(fstype=%s) target=%s pid=%d bin=%s (fstype not allowed)",
 			fstype, target, pid, exePath(pid))
 		return
+	}
+
+	if isOverlay {
+		for _, p := range parseOverlayLowerdirs(strings.Split(data, ",")) {
+			if !allowedOverlayLowerdir(resolvePath(p, pid), workdir) {
+				resp.Error = -int32(unix.EPERM)
+				logf("BLOCKED mount(overlay) lowerdir=%s target=%s pid=%d bin=%s (source not allowed)",
+					p, target, pid, exePath(pid))
+				return
+			}
+		}
 	}
 
 	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE

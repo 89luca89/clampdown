@@ -64,6 +64,15 @@ func seccompPtr() *json.RawMessage {
 
 func boolPtr(v bool) *bool { return &v }
 
+func withCIDInfraPrefixes(t *testing.T, cid string) {
+	t.Helper()
+	orig := append([]string{}, infraMountPrefixes...)
+	for i, p := range infraMountPrefixes {
+		infraMountPrefixes[i] = strings.ReplaceAll(p, "%CID%", cid)
+	}
+	t.Cleanup(func() { infraMountPrefixes = orig })
+}
+
 // baseConfig returns a Config that passes all checks.
 func baseConfig() Config {
 	var c Config
@@ -344,12 +353,7 @@ func TestCheckNamespaces_JoinedViaPath(t *testing.T) {
 
 func TestCheckMounts_Pass(t *testing.T) {
 	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
-	// Simulate main() resolving %CID% placeholder.
-	orig := append([]string{}, infraMountPrefixes...)
-	for i, p := range infraMountPrefixes {
-		infraMountPrefixes[i] = strings.ReplaceAll(p, "%CID%", "abc123def456")
-	}
-	t.Cleanup(func() { infraMountPrefixes = orig })
+	withCIDInfraPrefixes(t, "abc123def456")
 
 	c := baseConfig()
 	c.Mounts = []struct {
@@ -434,6 +438,116 @@ func TestCheckMounts_OverlayBlocked(t *testing.T) {
 	err := checkMounts(c)
 	if err == nil {
 		t.Fatal("expected error for overlay mount")
+	}
+}
+
+func TestParseOverlayLowerdirs(t *testing.T) {
+	opts := []string{"lowerdir=/a:/b", "upperdir=/u", "workdir=/w", "private"}
+	got := parseOverlayLowerdirs(opts)
+	if strings.Join(got, "|") != "/a|/b" {
+		t.Errorf("parseOverlayLowerdirs = %v", got)
+	}
+}
+
+func TestCheckMounts_OverlayLowerdirHostRejected(t *testing.T) {
+	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
+	withCIDInfraPrefixes(t, "abc")
+
+	c := baseConfig()
+	c.Mounts = []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		{
+			Source:      "/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/merge",
+			Destination: "/h",
+			Type:        "overlay",
+			Options: []string{
+				"lowerdir=/",
+				"upperdir=/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/upper",
+				"workdir=/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/work",
+				"private",
+				"userxattr",
+			},
+		},
+	}
+	if err := checkMounts(c); err == nil {
+		t.Fatal("expected error for overlay lowerdir=/")
+	}
+}
+
+func TestCheckMounts_OverlayLowerdirMultiRejected(t *testing.T) {
+	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
+	c := baseConfig()
+	c.Mounts = []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		{
+			Source:      "/home/user/project/merge",
+			Destination: "/h",
+			Type:        "overlay",
+			Options:     []string{"lowerdir=/home/user/project:/etc"},
+		},
+	}
+	if err := checkMounts(c); err == nil {
+		t.Fatal("expected error when one lowerdir component escapes workdir")
+	}
+}
+
+func TestCheckMounts_OverlayLowerdirWorkdirPass(t *testing.T) {
+	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
+	withCIDInfraPrefixes(t, "abc")
+
+	c := baseConfig()
+	c.Mounts = []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		{
+			Source:      "/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/merge",
+			Destination: "/h",
+			Type:        "overlay",
+			Options: []string{
+				"lowerdir=/home/user/project/cache",
+				"upperdir=/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/upper",
+				"workdir=/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/work",
+				"private",
+				"userxattr",
+			},
+		},
+	}
+	if err := checkMounts(c); err != nil {
+		t.Errorf("expected pass, got: %v", err)
+	}
+}
+
+func TestCheckMounts_OverlayLowerdirNamedVolume(t *testing.T) {
+	t.Setenv("SANDBOX_WORKDIR", "/home/user/project")
+	withCIDInfraPrefixes(t, "abc")
+
+	c := baseConfig()
+	c.Mounts = []struct {
+		Source      string   `json:"source"`
+		Destination string   `json:"destination"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+	}{
+		{
+			Source:      "/var/lib/containers/storage/overlay-containers/abc/userdata/overlay/x/merge",
+			Destination: "/h",
+			Type:        "overlay",
+			Options:     []string{"lowerdir=/var/lib/containers/storage/volumes/myvol/_data"},
+		},
+	}
+	if err := checkMounts(c); err != nil {
+		t.Errorf("expected pass, got: %v", err)
 	}
 }
 

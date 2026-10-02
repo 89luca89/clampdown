@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -556,6 +557,38 @@ func TestAllowedFsTypes(t *testing.T) {
 		got := allowedFsTypes[tt.fstype]
 		if got != tt.want {
 			t.Errorf("allowedFsTypes[%q] = %v, want %v", tt.fstype, got, tt.want)
+		}
+	}
+}
+
+func TestParseOverlayLowerdirs(t *testing.T) {
+	opts := strings.Split("lowerdir=/a:/b,upperdir=/u,workdir=/w,private", ",")
+	got := parseOverlayLowerdirs(opts)
+	if strings.Join(got, "|") != "/a|/b" {
+		t.Errorf("parseOverlayLowerdirs = %v", got)
+	}
+}
+
+func TestAllowedOverlayLowerdir(t *testing.T) {
+	workdir := "/home/user/project"
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"", false},
+		{"/", false},
+		{"/etc", false},
+		{"/var/lib/containers/storage", false},
+		{"/var/lib/containers/storage/overlay", false},
+		{"/var/lib/containers/storage/overlay/abc123/diff", true},
+		{"/home/user/project/cache", true},
+		{"/dev/null", true},
+		{"/proc/self/ns/mnt", true},
+	}
+	for _, tt := range tests {
+		got := allowedOverlayLowerdir(tt.path, workdir)
+		if got != tt.want {
+			t.Errorf("allowedOverlayLowerdir(%q, %q) = %v, want %v", tt.path, workdir, got, tt.want)
 		}
 	}
 }

@@ -407,36 +407,56 @@ func checkNamespaces(config Config) error {
 	return nil
 }
 
+func parseOverlayLowerdirs(options []string) []string {
+	var lower []string
+	for _, opt := range options {
+		v, ok := strings.CutPrefix(opt, "lowerdir=")
+		if !ok {
+			continue
+		}
+		lower = append(lower, strings.Split(v, ":")...)
+	}
+	return lower
+}
+
+func isAllowedMountSource(source, workdir string) bool {
+	resolved, err := filepath.EvalSymlinks(source)
+	if err == nil {
+		source = resolved
+	}
+	if isSubPath(workdir, source) ||
+		source == "/sandbox-seal" || source == "/rename_exdev_shim.so" {
+		return true
+	}
+	if source == kvmDevice && kvmForwarded() {
+		return true
+	}
+	for _, prefix := range infraMountPrefixes {
+		if isSubPath(prefix, source) {
+			return true
+		}
+	}
+	return isValidVolumeMount(source)
+}
+
 func checkMounts(config Config) error {
 	workdir := os.Getenv("SANDBOX_WORKDIR")
 
 	for _, m := range config.Mounts {
+		if m.Type == "overlay" {
+			for _, p := range parseOverlayLowerdirs(m.Options) {
+				if !isAllowedMountSource(p, workdir) {
+					return blocked(int(syscall.EACCES),
+						"overlay lowerdir '%s' for mount '%s' not permitted in nested containers",
+						p, m.Destination)
+				}
+			}
+		}
 		source := m.Source
 		if !strings.HasPrefix(source, "/") {
 			continue
 		}
-		resolved, resolveErr := filepath.EvalSymlinks(source)
-		if resolveErr == nil {
-			source = resolved
-		}
-		if isSubPath(workdir, source) ||
-			source == "/sandbox-seal" || source == "/rename_exdev_shim.so" {
-			continue
-		}
-		if source == kvmDevice && kvmForwarded() {
-			continue
-		}
-		allowed := false
-		for _, prefix := range infraMountPrefixes {
-			if isSubPath(prefix, source) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed && isValidVolumeMount(source) {
-			allowed = true
-		}
-		if !allowed {
+		if !isAllowedMountSource(source, workdir) {
 			return blocked(
 				int(syscall.EACCES),
 				"mount of '%s' not permitted in nested containers (not under workdir)",
