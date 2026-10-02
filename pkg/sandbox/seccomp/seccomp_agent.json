@@ -27,13 +27,47 @@
         "fsopen",
         "fsconfig",
         "fsmount",
-        "mount_setattr",
-        "mknod",
-        "mknodat"
+        "mount_setattr"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1,
-      "comment": "Container escape / namespace manipulation. mount/umount: CVE-2022-0492. setns: nsenter escape. open_by_handle_at: Shocker exploit. open_tree/move_mount/fsopen/fsconfig/fsmount/mount_setattr: new mount API (Linux 5.2+), same risk as mount(). mknod/mknodat: device node creation. Workloads never need any of these — only crun does during container creation."
+      "comment": "Container escape / namespace manipulation. mount/umount: CVE-2022-0492. setns: nsenter escape. open_by_handle_at: Shocker exploit. open_tree/move_mount/fsopen/fsconfig/fsmount/mount_setattr: new mount API (Linux 5.2+), same risk as mount(). Workloads never need any of these — only crun does during container creation."
+    },
+    {
+      "names": ["mknod"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 1, "value": 8192, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 61440 }
+      ],
+      "comment": "Block mknod(S_IFCHR 0o020000): character device node creation. mode arg at index 1; mask (0o170000) selects the type bits. FIFO (0o010000), socket (0o140000), regular (0o100000) remain allowed — make -j jobserver uses mkfifo."
+    },
+    {
+      "names": ["mknod"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 1, "value": 24576, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 61440 }
+      ],
+      "comment": "Block mknod(S_IFBLK 0o060000): block device node creation."
+    },
+    {
+      "names": ["mknodat"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 2, "value": 8192, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 61440 }
+      ],
+      "comment": "Block mknodat(S_IFCHR 0o020000): character device node creation. mode arg at index 2."
+    },
+    {
+      "names": ["mknodat"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "args": [
+        { "index": 2, "value": 24576, "op": "SCMP_CMP_MASKED_EQ", "valueTwo": 61440 }
+      ],
+      "comment": "Block mknodat(S_IFBLK 0o060000): block device node creation."
     },
     {
       "names": ["clone"],

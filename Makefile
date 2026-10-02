@@ -78,11 +78,16 @@ test:
 # Integration tests need these images on the host (pushed into sidecar at test start).
 INTEG_IMAGES := alpine python:alpine
 
+# Workload tests additionally need these upstream language toolchain images
+# (pulled from Docker Hub). Tests apk-add build dependencies inline, so no
+# custom images are built.
+WORKLOAD_IMAGES := rust:alpine golang:alpine node:alpine
+
 test-integration: .sidecar.stamp
-	@for img in $(INTEG_IMAGES); do \
+	@for img in $(INTEG_IMAGES) $(WORKLOAD_IMAGES); do \
 		$(CTR) image inspect $$img >/dev/null 2>&1 || $(CTR) pull $$img; \
 		done
-	CTR=$(CTR) go test -tags integration -count=1 -timeout 600s -v ./pkg/sandbox/
+	CTR=$(CTR) go test -tags integration -count=1 -timeout 1200s -v ./pkg/sandbox/
 
 # --- Go binaries (host builds, CGO_ENABLED=0) ---
 

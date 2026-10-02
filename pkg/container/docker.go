@@ -534,7 +534,17 @@ func (d *Docker) ImageID(ctx context.Context, image string) (string, error) {
 }
 
 func (d *Docker) PushImage(ctx context.Context, sidecar string, images []string) error {
-	saveCmd := d.command(ctx, append([]string{"save"}, images...)...)
+	for _, image := range images {
+		err := d.pushOne(ctx, sidecar, image)
+		if err != nil {
+			return fmt.Errorf("push %s: %w", image, err)
+		}
+	}
+	return nil
+}
+
+func (d *Docker) pushOne(ctx context.Context, sidecar, image string) error {
+	saveCmd := d.command(ctx, "save", image)
 	loadCmd := d.command(ctx,
 		"exec", "-i",
 		"-e", "CONTAINER_HOST="+SidecarAPI,

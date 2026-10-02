@@ -499,7 +499,17 @@ func (p *Podman) ImageID(ctx context.Context, image string) (string, error) {
 }
 
 func (p *Podman) PushImage(ctx context.Context, sidecar string, images []string) error {
-	saveCmd := p.command(ctx, append([]string{"save"}, images...)...)
+	for _, image := range images {
+		err := p.pushOne(ctx, sidecar, image)
+		if err != nil {
+			return fmt.Errorf("push %s: %w", image, err)
+		}
+	}
+	return nil
+}
+
+func (p *Podman) pushOne(ctx context.Context, sidecar, image string) error {
+	saveCmd := p.command(ctx, "save", image)
 	loadCmd := p.command(ctx,
 		"exec", "-i",
 		"-e", "CONTAINER_HOST="+SidecarAPI,

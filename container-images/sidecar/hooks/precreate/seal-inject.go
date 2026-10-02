@@ -139,10 +139,13 @@ func derivePolicy(mounts []mount) landlockPolicy {
 		// Standard binary/library dirs — always read+exec.
 		// /.sandbox holds injected binaries (rename shim .so) that
 		// the dynamic linker needs to mmap(PROT_EXEC) via LD_PRELOAD.
+		// /usr covers cross-compile toolchain binaries at
+		// /usr/<triple>/bin (as, ld, objcopy) that gcc spawns via
+		// posix_spawn. Rootfs is read-only so nothing attacker-controlled
+		// lives under /usr; real gating is seccomp, caps, no_new_privs.
 		ReadExec: []string{
 			"/bin", "/sbin",
-			"/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
-			"/usr/libexec", "/usr/local",
+			"/usr",
 			"/lib", "/lib64",
 			"/opt",
 			"/.sandbox",
