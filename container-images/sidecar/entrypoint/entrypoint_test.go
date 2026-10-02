@@ -740,3 +740,78 @@ func TestMountRootFromFD_BadPID(t *testing.T) {
 		t.Errorf("mountRootFromFD(badpid) = %q, want \"\"", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// fsmount / fspick handler tests
+//
+// Only branches before checkNotifValid are unit-testable; the ioctl needs
+// a real seccomp notification fd. The rest live in the integration suite.
+// ---------------------------------------------------------------------------
+
+func TestInterceptedSyscalls_IncludesFspick(t *testing.T) {
+	if !slices.Contains(interceptedSyscalls, uint32(unix.SYS_FSPICK)) {
+		t.Error("interceptedSyscalls missing SYS_FSPICK")
+	}
+	if !slices.Contains(interceptedSyscalls, uint32(unix.SYS_FSMOUNT)) {
+		t.Error("interceptedSyscalls missing SYS_FSMOUNT")
+	}
+}
+
+// selfAllowlist builds an execAllowlist entry for the current test binary
+// so isSidecarBinary(pid=os.Getpid()) returns true.
+func selfAllowlist(t *testing.T) *execAllowlist {
+	t.Helper()
+	exe := exePath(uint32(os.Getpid()))
+	if exe == "" {
+		t.Fatal("cannot resolve /proc/self/exe")
+	}
+	var st unix.Stat_t
+	if err := unix.Stat("/proc/self/exe", &st); err != nil {
+		t.Fatal(err)
+	}
+	return &execAllowlist{entries: map[string]execEntry{
+		exe: {Dev: st.Dev, Ino: st.Ino},
+	}}
+}
+
+func TestHandleFsmount_SidecarBinaryContinues(t *testing.T) {
+	al := selfAllowlist(t)
+	var notif seccompNotif
+	var resp seccompNotifResp
+	handleFsmount(&notif, &resp, uint32(os.Getpid()), "/workdir", al, -1)
+	if resp.Flags != unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE {
+		t.Errorf("expected CONTINUE flag, got Flags=%#x Error=%d",
+			resp.Flags, resp.Error)
+	}
+	if resp.Error != 0 {
+		t.Errorf("expected Error=0 on trust path, got %d", resp.Error)
+	}
+}
+
+func TestHandleFspick_SidecarBinaryContinues(t *testing.T) {
+	al := selfAllowlist(t)
+	var notif seccompNotif
+	var resp seccompNotifResp
+	handleFspick(&notif, &resp, uint32(os.Getpid()), "/workdir", al, -1)
+	if resp.Flags != unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE {
+		t.Errorf("expected CONTINUE flag, got Flags=%#x Error=%d",
+			resp.Flags, resp.Error)
+	}
+	if resp.Error != 0 {
+		t.Errorf("expected Error=0 on trust path, got %d", resp.Error)
+	}
+}
+
+func TestHandleFspick_PathReadErrorSetsErrno(t *testing.T) {
+	al := &execAllowlist{entries: map[string]execEntry{}}
+	var notif seccompNotif
+	notif.Data.Args[1] = 0xdeadbeef
+	var resp seccompNotifResp
+	handleFspick(&notif, &resp, 99999999, "/workdir", al, -1)
+	if resp.Error >= 0 {
+		t.Errorf("expected negative Error after read failure, got %d", resp.Error)
+	}
+	if resp.Flags != 0 {
+		t.Errorf("expected Flags=0 on error path, got %#x", resp.Flags)
+	}
+}

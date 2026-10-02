@@ -58,7 +58,7 @@ func reapZombies() {
 //
 //   - mount, umount2, mount_setattr, move_mount -- protect masked/RO paths
 //   - open_tree -- block non-recursive clones that strip sub-mounts
-//   - fsopen, fsconfig, fsmount -- block new mount API procfs bypass
+//   - fsopen, fsconfig, fsmount, fspick -- block new mount API procfs bypass
 //   - ptrace, process_vm_readv, process_vm_writev -- protect PID 1
 //   - execve, execveat -- hash-verified exec allowlist
 //   - openat -- block /proc/1/* opens from sidecar PID NS
@@ -73,6 +73,7 @@ var interceptedSyscalls = []uint32{
 	unix.SYS_FSOPEN,
 	unix.SYS_FSCONFIG,
 	unix.SYS_FSMOUNT,
+	unix.SYS_FSPICK,
 	unix.SYS_PTRACE,
 	unix.SYS_PROCESS_VM_READV,
 	unix.SYS_PROCESS_VM_WRITEV,

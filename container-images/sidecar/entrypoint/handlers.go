@@ -466,8 +466,101 @@ func mountRootFromFD(pid uint32, fd int32) string {
 	return ""
 }
 
-// handleSidecarPIDNSBlock blocks a syscall from the sidecar PID namespace.
-// Nested container processes (different PID NS) get CONTINUE.
+// handleFsmount validates fsmount(fs_fd, flags, attr_flags). Sidecar
+// binaries (crun) are trusted; untrusted callers get the bind allowlist
+// via mountRootFromFD on the fs_fd. An fsopen'd context has no backing
+// mount so resolution fails closed -- only crun reaches this legitimately.
+func handleFsmount(
+	notif *seccompNotif,
+	resp *seccompNotifResp,
+	pid uint32,
+	workdir string,
+	allowlist *execAllowlist,
+	notifFD int,
+) {
+	if allowlist.isSidecarBinary(pid) {
+		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		return
+	}
+
+	fsFd := int32(notif.Data.Args[0])
+	source := mountRootFromFD(pid, fsFd)
+
+	if !checkNotifValid(notifFD, &notif.ID) {
+		return
+	}
+
+	if source == "" {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED fsmount: cannot resolve source fd=%d pid=%d bin=%s",
+			fsFd, pid, exePath(pid))
+		return
+	}
+
+	if !isAllowedBindSource(source, workdir) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED fsmount source=%s pid=%d bin=%s (source not allowed)",
+			source, pid, exePath(pid))
+		return
+	}
+
+	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+}
+
+// handleFspick validates fspick(dirfd, path, flags). Sidecar binaries
+// are trusted; untrusted callers get the bind allowlist. Source is the
+// path arg, or the mount referenced by dirfd (FSPICK_EMPTY_PATH).
+func handleFspick(
+	notif *seccompNotif,
+	resp *seccompNotifResp,
+	pid uint32,
+	workdir string,
+	allowlist *execAllowlist,
+	notifFD int,
+) {
+	if allowlist.isSidecarBinary(pid) {
+		resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+		return
+	}
+
+	pathRaw, err := readStringFromPID(pid, notif.Data.Args[1])
+	if err != nil {
+		resp.Error = -syscallErrno(err)
+		logf("BLOCKED fspick: cannot read path pid=%d: %v", pid, err)
+		return
+	}
+
+	var source string
+	if pathRaw == "" {
+		source = mountRootFromFD(pid, int32(notif.Data.Args[0]))
+	} else {
+		source = resolvePath(pathRaw, pid)
+	}
+
+	if !checkNotifValid(notifFD, &notif.ID) {
+		return
+	}
+
+	if source == "" {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED fspick: cannot resolve source pid=%d bin=%s",
+			pid, exePath(pid))
+		return
+	}
+
+	if !isAllowedBindSource(source, workdir) {
+		resp.Error = -int32(unix.EPERM)
+		logf("BLOCKED fspick source=%s pid=%d bin=%s (source not allowed)",
+			source, pid, exePath(pid))
+		return
+	}
+
+	resp.Flags = unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE
+}
+
+// handleSidecarPIDNSBlock blocks fsopen/fsconfig from the sidecar PID
+// namespace; nested PID NS gets CONTINUE. fsmount/fspick land in their
+// own handlers with source checks.
 func handleSidecarPIDNSBlock(
 	notif *seccompNotif,
 	resp *seccompNotifResp,

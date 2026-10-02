@@ -169,7 +169,9 @@ func runSupervisor(notifFD int, protected map[string]bool, workdir string, allow
 		case int32(unix.SYS_FSCONFIG):
 			handleSidecarPIDNSBlock(&notif, &resp, pid, myPIDNS, notifFD, "fsconfig")
 		case int32(unix.SYS_FSMOUNT):
-			handleSidecarPIDNSBlock(&notif, &resp, pid, myPIDNS, notifFD, "fsmount")
+			handleFsmount(&notif, &resp, pid, workdir, allowlist, notifFD)
+		case int32(unix.SYS_FSPICK):
+			handleFspick(&notif, &resp, pid, workdir, allowlist, notifFD)
 
 		// PID 1 protection.
 		case int32(unix.SYS_PTRACE), int32(unix.SYS_PROCESS_VM_READV), int32(unix.SYS_PROCESS_VM_WRITEV):
