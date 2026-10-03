@@ -42,14 +42,11 @@
       "names": [
         "io_pgetevents",
         "io_pgetevents_time64",
-        "map_shadow_stack",
-        "pciconfig_iobase",
-        "pciconfig_read",
-        "pciconfig_write"
+        "map_shadow_stack"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 38,
-      "comment": "Rarely-used or arch-specific syscalls. ENOSYS — io_pgetevents: old AIO. pciconfig_*: raw PCI (PowerPC). map_shadow_stack: CET (not used by Go/podman)."
+      "comment": "Rarely-used or arch-specific syscalls. ENOSYS — io_pgetevents: old AIO. map_shadow_stack: CET (not used by Go/podman). pciconfig_* dropped: unwired on x86_64, cap-gated on ARM."
     },
 
     {

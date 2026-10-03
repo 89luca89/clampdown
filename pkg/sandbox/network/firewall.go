@@ -28,8 +28,10 @@ const (
 	maxRulesPerChunk = 150
 )
 
-var privateV4 = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"}
-var privateV6 = []string{"::1/128", "fc00::/7", "fe80::/10"}
+// Loopback (127.0.0.0/8, ::1/128) omitted: REJECT/DROP rules carry
+// ! -o lo and loopback-destined packets always route through lo.
+var privateV4 = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"}
+var privateV6 = []string{"fc00::/7", "fe80::/10"}
 
 // FirewallEntry is a single dynamic rule (allow or block) for a host.
 type FirewallEntry struct {

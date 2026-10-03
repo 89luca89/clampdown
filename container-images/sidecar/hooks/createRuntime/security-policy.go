@@ -628,12 +628,6 @@ func checkMountOptions(config Config) error {
 				m.Destination,
 			)
 		}
-		if !hasOpt(m.Options, "nodev") {
-			return blocked(int(syscall.EACCES),
-				"writable mount '%s' missing nodev — not permitted in nested containers",
-				m.Destination,
-			)
-		}
 	}
 	return nil
 }

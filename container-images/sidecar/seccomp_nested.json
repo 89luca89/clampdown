@@ -400,14 +400,11 @@
     {
       "names": [
         "ioperm",
-        "iopl",
-        "pciconfig_iobase",
-        "pciconfig_read",
-        "pciconfig_write"
+        "iopl"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1,
-      "comment": "Hardware / raw I/O. Direct port and PCI access."
+      "comment": "Hardware / raw I/O. Direct port access. pciconfig_* dropped: unwired on x86_64 (ENOSYS from kernel), CAP_SYS_ADMIN-gated on ARM (dropped)."
     },
 
     {
