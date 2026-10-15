@@ -142,7 +142,6 @@ func maskSensitivePaths() {
 	for _, p := range []string{
 		"/proc/acpi",
 		"/proc/asound",
-		"/proc/scsi",
 		"/sys/devices/virtual/powercap",
 		"/sys/firmware",
 		"/sys/fs/selinux",

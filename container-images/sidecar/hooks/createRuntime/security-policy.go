@@ -120,7 +120,6 @@ var requiredMaskedPaths = []string{
 	"/proc/kcore",
 	"/proc/keys",
 	"/proc/modules",
-	"/proc/scsi",
 	"/proc/sysrq-trigger",
 	"/proc/timer_list",
 	"/proc/version",
